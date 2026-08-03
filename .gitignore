@@ -1,3 +1,5 @@
 .env
 scan_results.json
+subs.txt
 __pycache__/
+.venv/
