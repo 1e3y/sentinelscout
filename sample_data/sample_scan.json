@@ -1,0 +1,5 @@
+[
+    {"url": "https://admin.example.com", "status_code": 200, "title": "Admin Login"},
+    {"url": "https://dev.example.com", "status_code": 500, "title": "Development Server"},
+    {"url": "https://cdn.example.com", "status_code": 200, "title": "CDN Endpoint"}
+  ]
