@@ -3,35 +3,78 @@
 
 import argparse
 import json
+import re
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 SCAN_RESULTS_PATH = SCRIPT_DIR / "scan_results.json"
+
+SUBFINDER_TIMEOUT = 180  # 3 minutes
+HTTPX_TIMEOUT = 120  # 2 minutes
+MAX_SUBDOMAINS = 500
+
+DOMAIN_PATTERN = re.compile(
+    r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)*"
+    r"[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$"
+)
 
 
 class ScannerError(Exception):
     """Raised when subdomain scanning fails."""
 
 
-def discover_subdomains(domain: str) -> list[str]:
+@dataclass
+class DomainScanResult:
+    results: list[dict]
+    truncation_note: str | None = None
+
+
+def sanitize_domain(domain: str) -> str:
+    domain = domain.strip().lower().rstrip(".")
+    if not DOMAIN_PATTERN.match(domain):
+        raise ScannerError(
+            "Invalid domain. Only alphanumeric characters, hyphens, and dots are allowed."
+        )
+    if len(domain) > 253:
+        raise ScannerError("Domain name too long.")
+    return domain
+
+
+def discover_subdomains(domain: str) -> tuple[list[str], str | None]:
     try:
         process = subprocess.run(
             ["subfinder", "-d", domain, "-silent"],
             capture_output=True,
             text=True,
             check=False,
+            timeout=SUBFINDER_TIMEOUT,
+            shell=False,
         )
     except FileNotFoundError as exc:
         raise ScannerError("subfinder is not installed or not on PATH.") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise ScannerError("subfinder timed out after 3 minutes.") from exc
 
     if process.returncode not in (0, 1):
         message = process.stderr.strip() or "subfinder exited with an error"
         raise ScannerError(f"subfinder failed: {message}")
 
     subdomains = [line.strip() for line in process.stdout.splitlines() if line.strip()]
-    return subdomains or [domain]
+    if not subdomains:
+        subdomains = [domain]
+
+    truncation_note = None
+    if len(subdomains) > MAX_SUBDOMAINS:
+        total_found = len(subdomains)
+        subdomains = subdomains[:MAX_SUBDOMAINS]
+        truncation_note = (
+            f"Subdomain list truncated to {MAX_SUBDOMAINS} of {total_found} discovered."
+        )
+
+    return subdomains, truncation_note
 
 
 def scan_targets(targets: list[str]) -> list[dict]:
@@ -52,9 +95,13 @@ def scan_targets(targets: list[str]) -> list[dict]:
             capture_output=True,
             text=True,
             check=False,
+            timeout=HTTPX_TIMEOUT,
+            shell=False,
         )
     except FileNotFoundError as exc:
         raise ScannerError("httpx is not installed or not on PATH.") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise ScannerError("httpx timed out after 2 minutes.") from exc
 
     if process.returncode not in (0, 1):
         message = process.stderr.strip() or "httpx exited with an error"
@@ -81,9 +128,11 @@ def scan_targets(targets: list[str]) -> list[dict]:
     return results
 
 
-def scan_domain(domain: str) -> list[dict]:
-    targets = discover_subdomains(domain)
-    return scan_targets(targets)
+def scan_domain(domain: str) -> DomainScanResult:
+    safe_domain = sanitize_domain(domain)
+    targets, truncation_note = discover_subdomains(safe_domain)
+    results = scan_targets(targets)
+    return DomainScanResult(results=results, truncation_note=truncation_note)
 
 
 def save_scan_results(results: list[dict], path: Path = SCAN_RESULTS_PATH) -> None:
