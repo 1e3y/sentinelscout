@@ -120,6 +120,76 @@ def analyze_scan_data(scan_data: list[dict]) -> dict:
     return extract_json_from_response(content)
 
 
+REPORT_PROMPT = (
+    "You are a senior cybersecurity analyst preparing an executive security report. "
+    "Given subdomain scan findings for a target domain, produce a professional report narrative. "
+    "Return ONLY valid JSON with this structure: "
+    "{\"executive_summary\": [\"paragraph 1\", \"paragraph 2\", \"paragraph 3\"], "
+    "\"remediation\": [{\"subdomain\": \"url\", \"risk_level\": \"High/Medium\", "
+    "\"steps\": [\"actionable step 1\", \"actionable step 2\"]}]}. "
+    "Write exactly 2-3 paragraphs for executive_summary covering overall risk posture, "
+    "key exposures, and business impact. "
+    "Include remediation entries ONLY for High and Medium risk findings with specific, "
+    "actionable steps (2-4 steps each). Use clear professional language suitable for executives."
+)
+
+
+def extract_report_json(content: str) -> dict:
+    content = content.strip()
+
+    fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", content, re.IGNORECASE)
+    if fence_match:
+        content = fence_match.group(1).strip()
+
+    try:
+        parsed = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise AnalyzerError(f"Report AI response is not valid JSON: {exc}") from exc
+
+    if not isinstance(parsed, dict):
+        raise AnalyzerError("Report AI response must be a JSON object.")
+
+    parsed.setdefault("executive_summary", [])
+    parsed.setdefault("remediation", [])
+
+    if isinstance(parsed["executive_summary"], str):
+        parsed["executive_summary"] = [parsed["executive_summary"]]
+
+    return parsed
+
+
+def generate_report_content(domain: str, subdomains: list[dict]) -> dict:
+    client = get_openai_client()
+    payload = {
+        "domain": domain,
+        "findings": subdomains,
+    }
+
+    try:
+        response = client.chat.completions.create(
+            model=MODEL,
+            messages=[
+                {"role": "system", "content": REPORT_PROMPT},
+                {"role": "user", "content": json.dumps(payload, indent=2)},
+            ],
+            temperature=0.3,
+        )
+    except AuthenticationError as exc:
+        raise AnalyzerError("Authentication failed. Check your OPENAI_API_KEY.") from exc
+    except RateLimitError as exc:
+        raise AnalyzerError("Rate limit exceeded. Try again later.") from exc
+    except APIConnectionError as exc:
+        raise AnalyzerError(f"Could not connect to API: {exc}") from exc
+    except APIError as exc:
+        raise AnalyzerError(f"API error: {exc}") from exc
+
+    content = response.choices[0].message.content
+    if not content:
+        raise AnalyzerError("API returned an empty report response.")
+
+    return extract_report_json(content)
+
+
 def merge_scan_and_analysis(
     scan_data: list[dict], analysis: dict
 ) -> list[dict]:
