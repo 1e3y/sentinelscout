@@ -1,0 +1,30 @@
+# Env
+.env
+.env.local
+.env.*.local
+apps/web/.env.local
+apps/api/.env
+
+# Dependencies / build
+node_modules/
+apps/web/.next/
+apps/web/out/
+apps/api/.venv/
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/
+*.egg-info/
+dist/
+build/
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Misc
+*.log
+coverage/
+.turbo/

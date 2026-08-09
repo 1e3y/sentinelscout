@@ -1,0 +1,548 @@
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+
+export type MeResponse = {
+  id: string;
+  clerk_user_id: string;
+  email: string;
+  name: string | null;
+  created_at: string;
+  active_organization_id: string | null;
+};
+
+export type OrganizationResponse = {
+  id: string;
+  clerk_org_id: string;
+  name: string;
+  role: string;
+  created_at: string;
+};
+
+export type TargetAuthorization = {
+  method: string;
+  txt_name: string;
+  txt_value: string;
+  created_at: string;
+  last_checked_at: string | null;
+  verified_at: string | null;
+};
+
+export type TargetResponse = {
+  id: string;
+  organization_id: string;
+  domain: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  verified_at: string | null;
+  revoked_at: string | null;
+  authorization: TargetAuthorization | null;
+};
+
+export type TargetScopeResponse = {
+  target_id: string;
+  root_domain: string;
+  include_subdomains: boolean;
+  exclusions: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type VerifyTargetResponse = {
+  id: string;
+  domain: string;
+  status: string;
+  verified: boolean;
+  detail: string;
+};
+
+export type OperationControlSnapshotResponse = {
+  id: string;
+  operation_id: string;
+  organization_id: string;
+  target_id: string;
+  target_domain: string;
+  authorization_status: string;
+  target_authorization_id: string | null;
+  scope_root: string;
+  include_subdomains: boolean;
+  exclusions: string[];
+  operation_source: string;
+  testing_profile: string;
+  created_by_user_id: string;
+  created_at: string;
+  notes: string | null;
+};
+
+export type OperationResponse = {
+  id: string;
+  organization_id: string;
+  target_id: string;
+  target_domain: string;
+  created_by_user_id: string;
+  status: string;
+  source: string;
+  testing_profile: string;
+  stop_requested: boolean;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  failed_at: string | null;
+  stopped_at: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  control_snapshot: OperationControlSnapshotResponse | null;
+};
+
+export type MonitoringConfigurationResponse = {
+  id: string | null;
+  organization_id: string;
+  target_id: string;
+  enabled: boolean;
+  frequency: string;
+  next_run_at: string | null;
+  last_run_at: string | null;
+  disabled_reason: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  latest_changes: {
+    new?: number;
+    gone?: number;
+    changed?: number;
+  };
+};
+
+export type OperationEventResponse = {
+  id: string;
+  operation_id: string;
+  sequence: number;
+  event_type: string;
+  summary: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+};
+
+export type AssetResponse = {
+  id: string;
+  organization_id: string;
+  target_id: string;
+  hostname: string;
+  url: string;
+  asset_type: string;
+  status_code: number | null;
+  title: string | null;
+  source: string;
+  first_seen_at: string;
+  last_seen_at: string;
+};
+
+export type DiscoveryObservationResponse = {
+  id: string;
+  organization_id: string;
+  operation_id: string;
+  asset_id: string | null;
+  observation_type: string;
+  summary: string;
+  metadata: Record<string, unknown>;
+  source: string;
+  created_at: string;
+};
+
+export type SecurityCandidateResponse = {
+  id: string;
+  organization_id: string;
+  operation_id: string;
+  asset_id: string;
+  asset_hostname: string | null;
+  asset_url: string | null;
+  candidate_type: string;
+  title: string;
+  summary: string;
+  status: string;
+  source: string;
+  evidence: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ValidationAttemptResponse = {
+  id: string;
+  organization_id: string;
+  operation_id: string;
+  candidate_id: string;
+  asset_id: string;
+  status: string;
+  validation_method: string;
+  summary: string;
+  evidence: Record<string, unknown>;
+  created_at: string;
+  completed_at: string | null;
+};
+
+export type FindingProvenanceResponse = {
+  chain: string[];
+  finding_id: string;
+  candidate_id: string;
+  asset_id: string;
+  operation_id: string;
+  target_id: string | null;
+  observation_ids: string[];
+  validation_attempt_id: string | null;
+  validation_method: string | null;
+  retest_attempt_id: string | null;
+  control_snapshot: {
+    target_domain: string;
+    authorization_status: string;
+    scope_root: string;
+    include_subdomains: boolean;
+    exclusions: string[];
+    testing_profile: string;
+    operation_source: string;
+  } | null;
+};
+
+export type FindingResponse = {
+  id: string;
+  organization_id: string;
+  operation_id: string;
+  candidate_id: string;
+  asset_id: string;
+  asset_hostname: string | null;
+  asset_url: string | null;
+  title: string;
+  summary: string;
+  severity: string;
+  status: string;
+  business_impact: string;
+  remediation_guidance: string;
+  evidence: Record<string, unknown>;
+  provenance: FindingProvenanceResponse | null;
+  created_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+};
+
+export type AuditEventResponse = {
+  id: string;
+  organization_id: string;
+  actor_type: string;
+  actor_user_id: string | null;
+  action: string;
+  resource_type: string;
+  resource_id: string | null;
+  summary: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+};
+
+export type RetestAttemptResponse = {
+  id: string;
+  organization_id: string;
+  finding_id: string;
+  candidate_id: string;
+  asset_id: string;
+  original_validation_attempt_id: string;
+  status: string;
+  method: string;
+  summary: string;
+  evidence: Record<string, unknown>;
+  created_at: string;
+  completed_at: string | null;
+};
+
+async function apiFetch<T>(
+  path: string,
+  token: string,
+  init?: RequestInit,
+): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      ...(init?.headers ?? {}),
+    },
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`API ${path} failed (${response.status}): ${detail}`);
+  }
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  return response.json() as Promise<T>;
+}
+
+export function fetchMe(token: string): Promise<MeResponse> {
+  return apiFetch<MeResponse>("/v1/me", token);
+}
+
+export function fetchOrganizations(token: string): Promise<OrganizationResponse[]> {
+  return apiFetch<OrganizationResponse[]>("/v1/organizations", token);
+}
+
+export function fetchTargets(token: string): Promise<TargetResponse[]> {
+  return apiFetch<TargetResponse[]>("/v1/targets", token);
+}
+
+export function fetchTargetMonitoring(
+  token: string,
+  targetId: string,
+): Promise<MonitoringConfigurationResponse> {
+  return apiFetch<MonitoringConfigurationResponse>(
+    `/v1/targets/${targetId}/monitoring`,
+    token,
+  );
+}
+
+export function updateTargetMonitoring(
+  token: string,
+  targetId: string,
+  body: { enabled: boolean; frequency: "daily" | "weekly" },
+): Promise<MonitoringConfigurationResponse> {
+  return apiFetch<MonitoringConfigurationResponse>(
+    `/v1/targets/${targetId}/monitoring`,
+    token,
+    {
+      method: "PUT",
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export function createTarget(token: string, domain: string): Promise<TargetResponse> {
+  return apiFetch<TargetResponse>("/v1/targets", token, {
+    method: "POST",
+    body: JSON.stringify({ domain }),
+  });
+}
+
+export function startTargetVerification(
+  token: string,
+  targetId: string,
+): Promise<TargetResponse> {
+  return apiFetch<TargetResponse>(`/v1/targets/${targetId}/verification`, token, {
+    method: "POST",
+  });
+}
+
+export function verifyTarget(
+  token: string,
+  targetId: string,
+): Promise<VerifyTargetResponse> {
+  return apiFetch<VerifyTargetResponse>(`/v1/targets/${targetId}/verify`, token, {
+    method: "POST",
+  });
+}
+
+export function revokeTarget(token: string, targetId: string): Promise<TargetResponse> {
+  return apiFetch<TargetResponse>(`/v1/targets/${targetId}/revoke`, token, {
+    method: "POST",
+  });
+}
+
+export function fetchTargetScope(
+  token: string,
+  targetId: string,
+): Promise<TargetScopeResponse> {
+  return apiFetch<TargetScopeResponse>(`/v1/targets/${targetId}/scope`, token);
+}
+
+export function updateTargetScope(
+  token: string,
+  targetId: string,
+  body: { include_subdomains: boolean; exclusions: string[] },
+): Promise<TargetScopeResponse> {
+  return apiFetch<TargetScopeResponse>(`/v1/targets/${targetId}/scope`, token, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+export function fetchOperations(token: string): Promise<OperationResponse[]> {
+  return apiFetch<OperationResponse[]>("/v1/operations", token);
+}
+
+export function createOperation(
+  token: string,
+  targetId: string,
+): Promise<OperationResponse> {
+  return apiFetch<OperationResponse>("/v1/operations", token, {
+    method: "POST",
+    body: JSON.stringify({ target_id: targetId }),
+  });
+}
+
+export function fetchOperation(
+  token: string,
+  operationId: string,
+): Promise<OperationResponse> {
+  return apiFetch<OperationResponse>(`/v1/operations/${operationId}`, token);
+}
+
+export function fetchOperationEvents(
+  token: string,
+  operationId: string,
+): Promise<OperationEventResponse[]> {
+  return apiFetch<OperationEventResponse[]>(
+    `/v1/operations/${operationId}/events`,
+    token,
+  );
+}
+
+export function stopOperation(
+  token: string,
+  operationId: string,
+): Promise<OperationResponse> {
+  return apiFetch<OperationResponse>(`/v1/operations/${operationId}/stop`, token, {
+    method: "POST",
+  });
+}
+
+export function fetchOperationAssets(
+  token: string,
+  operationId: string,
+): Promise<AssetResponse[]> {
+  return apiFetch<AssetResponse[]>(`/v1/operations/${operationId}/assets`, token);
+}
+
+export function fetchOperationObservations(
+  token: string,
+  operationId: string,
+): Promise<DiscoveryObservationResponse[]> {
+  return apiFetch<DiscoveryObservationResponse[]>(
+    `/v1/operations/${operationId}/observations`,
+    token,
+  );
+}
+
+export function fetchOperationCandidates(
+  token: string,
+  operationId: string,
+): Promise<SecurityCandidateResponse[]> {
+  return apiFetch<SecurityCandidateResponse[]>(
+    `/v1/operations/${operationId}/candidates`,
+    token,
+  );
+}
+
+export function fetchCandidate(
+  token: string,
+  candidateId: string,
+): Promise<SecurityCandidateResponse> {
+  return apiFetch<SecurityCandidateResponse>(`/v1/candidates/${candidateId}`, token);
+}
+
+export function queueCandidateValidation(
+  token: string,
+  candidateId: string,
+): Promise<ValidationAttemptResponse> {
+  return apiFetch<ValidationAttemptResponse>(
+    `/v1/candidates/${candidateId}/validate`,
+    token,
+    { method: "POST" },
+  );
+}
+
+export function fetchCandidateValidationAttempts(
+  token: string,
+  candidateId: string,
+): Promise<ValidationAttemptResponse[]> {
+  return apiFetch<ValidationAttemptResponse[]>(
+    `/v1/candidates/${candidateId}/validation-attempts`,
+    token,
+  );
+}
+
+export function promoteCandidate(
+  token: string,
+  candidateId: string,
+): Promise<FindingResponse> {
+  return apiFetch<FindingResponse>(`/v1/candidates/${candidateId}/promote`, token, {
+    method: "POST",
+  });
+}
+
+export function fetchFindings(token: string): Promise<FindingResponse[]> {
+  return apiFetch<FindingResponse[]>("/v1/findings", token);
+}
+
+export function fetchFinding(
+  token: string,
+  findingId: string,
+): Promise<FindingResponse> {
+  return apiFetch<FindingResponse>(`/v1/findings/${findingId}`, token);
+}
+
+export function startFindingRemediation(
+  token: string,
+  findingId: string,
+): Promise<FindingResponse> {
+  return apiFetch<FindingResponse>(
+    `/v1/findings/${findingId}/start-remediation`,
+    token,
+    { method: "POST" },
+  );
+}
+
+export function markFindingReadyForRetest(
+  token: string,
+  findingId: string,
+): Promise<FindingResponse> {
+  return apiFetch<FindingResponse>(
+    `/v1/findings/${findingId}/ready-for-retest`,
+    token,
+    { method: "POST" },
+  );
+}
+
+export function queueFindingRetest(
+  token: string,
+  findingId: string,
+): Promise<RetestAttemptResponse> {
+  return apiFetch<RetestAttemptResponse>(`/v1/findings/${findingId}/retest`, token, {
+    method: "POST",
+  });
+}
+
+export function fetchFindingRetests(
+  token: string,
+  findingId: string,
+): Promise<RetestAttemptResponse[]> {
+  return apiFetch<RetestAttemptResponse[]>(
+    `/v1/findings/${findingId}/retests`,
+    token,
+  );
+}
+
+export type AuditEventFilters = {
+  resource_type?: string;
+  resource_id?: string;
+  action?: string;
+  created_after?: string;
+  created_before?: string;
+  limit?: number;
+};
+
+export function fetchAuditEvents(
+  token: string,
+  filters: AuditEventFilters = {},
+): Promise<AuditEventResponse[]> {
+  const params = new URLSearchParams();
+  if (filters.resource_type) params.set("resource_type", filters.resource_type);
+  if (filters.resource_id) params.set("resource_id", filters.resource_id);
+  if (filters.action) params.set("action", filters.action);
+  if (filters.created_after) params.set("created_after", filters.created_after);
+  if (filters.created_before) params.set("created_before", filters.created_before);
+  if (filters.limit != null) params.set("limit", String(filters.limit));
+  const query = params.toString();
+  return apiFetch<AuditEventResponse[]>(
+    `/v1/audit-events${query ? `?${query}` : ""}`,
+    token,
+  );
+}

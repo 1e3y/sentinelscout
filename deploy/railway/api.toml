@@ -1,0 +1,17 @@
+# Railway service config reference for the Scout API.
+# In the Railway dashboard: set Root Directory = apps/api, then apply these settings
+# (or copy this file content into the service's railway.toml if you use config-as-code).
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+watchPatterns = ["**"]
+
+[deploy]
+# Release runs once per deploy before traffic switches — not on every process restart.
+releaseCommand = "sh scripts/migrate.sh"
+startCommand = "sh -c '/app/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}'"
+healthcheckPath = "/ready"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10

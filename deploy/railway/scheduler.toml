@@ -1,0 +1,13 @@
+# Railway service config reference for the Scout scheduler.
+# Root Directory = apps/api. Same Dockerfile as API; different start command.
+# Do NOT set a releaseCommand here (migrations belong on the API service only).
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+watchPatterns = ["**"]
+
+[deploy]
+startCommand = "/app/.venv/bin/python -m app.scheduler"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
