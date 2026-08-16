@@ -58,6 +58,17 @@ export function OperationsPanel({ enabled }: Props) {
   const isActive =
     selected?.status === "queued" || selected?.status === "running";
 
+  // Auto-sync selection with available verified targets
+  useEffect(() => {
+    if (verifiedTargets.length > 0) {
+      if (!createTargetId || !verifiedTargets.some((t) => t.id === createTargetId)) {
+        setCreateTargetId(verifiedTargets[0].id);
+      }
+    } else {
+      setCreateTargetId("");
+    }
+  }, [targets, createTargetId, verifiedTargets]);
+
   async function withToken<T>(fn: (token: string) => Promise<T>): Promise<T | null> {
     const token = await getToken();
     if (!token) {
@@ -116,10 +127,12 @@ export function OperationsPanel({ enabled }: Props) {
           if (current && ops.some((op) => op.id === current)) return current;
           return ops[0]?.id ?? null;
         });
-        if (!createTargetId) {
-          const firstVerified = tgs.find((t) => t.status === "verified");
-          if (firstVerified) setCreateTargetId(firstVerified.id);
-        }
+
+        const verified = tgs.filter((t) => t.status === "verified");
+        setCreateTargetId((current) => {
+          if (current && verified.some((t) => t.id === current)) return current;
+          return verified[0]?.id ?? "";
+        });
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load operations");
       }
@@ -144,8 +157,12 @@ export function OperationsPanel({ enabled }: Props) {
           if (current && ops.some((op) => op.id === current)) return current;
           return ops[0]?.id ?? null;
         });
-        const firstVerified = tgs.find((t) => t.status === "verified");
-        if (firstVerified) setCreateTargetId(firstVerified.id);
+
+        const verified = tgs.filter((t) => t.status === "verified");
+        setCreateTargetId((current) => {
+          if (current && verified.some((t) => t.id === current)) return current;
+          return verified[0]?.id ?? "";
+        });
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : "Failed to load operations");
