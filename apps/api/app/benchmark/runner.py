@@ -31,13 +31,18 @@ from app.benchmark.paths import (
 from app.benchmark.schema import SCHEMA_VERSION, validate_result
 from app.benchmark.scorer import score
 from app.benchmark.world import seed_world
-from app.models.asset import Asset
+from app.models.asset import Asset, DiscoveryObservation
 from app.models.candidate import SecurityCandidate
+from app.models.coverage import OperationCoverageSummary
 from app.models.finding import Finding
 from app.models.operation import Operation
 from app.models.retest import RetestAttempt
 from app.models.validation import ValidationAttempt
 from app.services.audit import record_audit
+from app.services.coverage import (
+    coverage_payload_from_snapshot,
+    freeze_operation_coverage,
+)
 from app.services.findings import mark_ready_for_retest, promote_candidate_to_finding
 from app.services.findings.remediation import start_remediation
 from app.services.operations import append_event, queue_candidate_validation
@@ -115,15 +120,19 @@ def _start_operation(db: Session, operation_id: UUID) -> Operation:
 
 
 def _pairs_for_operation(db: Session, operation_id: UUID) -> tuple[set[str], set[tuple[str, str]]]:
-    operation = db.get(Operation, operation_id)
-    if operation is None:
-        raise RuntimeError("benchmark operation disappeared")
-    assets = list(db.scalars(select(Asset).where(Asset.target_id == operation.target_id)).all())
+    http_obs = list(
+        db.scalars(
+            select(DiscoveryObservation).where(
+                DiscoveryObservation.operation_id == operation_id,
+                DiscoveryObservation.observation_type == "http_response_observed",
+            )
+        ).all()
+    )
     found_hosts = {
-        asset.hostname.lower().rstrip(".")
-        for asset in assets
-        if asset.asset_type == "http_service"
+        str((row.observation_metadata or {}).get("hostname") or "").lower().rstrip(".")
+        for row in http_obs
     }
+    found_hosts.discard("")
     candidates = list(
         db.scalars(
             select(SecurityCandidate).where(SecurityCandidate.operation_id == operation_id)
@@ -131,10 +140,10 @@ def _pairs_for_operation(db: Session, operation_id: UUID) -> tuple[set[str], set
     )
     emitted: set[tuple[str, str]] = set()
     for candidate in candidates:
-        asset = db.get(Asset, candidate.asset_id)
-        if asset is None:
+        host = str((candidate.evidence or {}).get("asset_hostname") or "").lower().rstrip(".")
+        if not host:
             continue
-        emitted.add((asset.hostname.lower().rstrip("."), candidate.candidate_type))
+        emitted.add((host, candidate.candidate_type))
     return found_hosts, emitted
 
 
@@ -246,6 +255,19 @@ def _build_tools(
     return tools, subfinder_hosts, used_httpx
 
 
+def _coverage_payload(db: Session, operation: Operation) -> dict[str, Any]:
+    freeze_operation_coverage(db, operation, source="recovered", actor_type="system")
+    db.commit()
+    row = db.scalar(
+        select(OperationCoverageSummary).where(
+            OperationCoverageSummary.operation_id == operation.id
+        )
+    )
+    if row is None:
+        raise RuntimeError("coverage snapshot missing after freeze")
+    return coverage_payload_from_snapshot(db, operation, row)
+
+
 def run_fixture(
     db: Session,
     fixture_id: str,
@@ -281,6 +303,14 @@ def run_fixture(
             raise RuntimeError(
                 f"discovery job ended {executed.status}: {executed.error_message or 'unknown'}"
             )
+        db.refresh(executed)
+        frozen_surface = dict(
+            (_coverage_payload(db, executed).get("surface") or {})
+        )
+
+        if truth.coverage and truth.coverage.validation_force_redirect:
+            for host in truth.coverage.validation_force_redirect:
+                http_client.mark_redirect(host)
 
         candidates = list(
             db.scalars(
@@ -324,6 +354,8 @@ def run_fixture(
             used_httpx_binary=used_httpx,
             git_sha=git_sha(),
             operation_id=str(operation.id),
+            coverage=_coverage_payload(db, executed),
+            frozen_surface=frozen_surface,
         )
         result["schema_version"] = SCHEMA_VERSION
         validate_result(result)
@@ -376,6 +408,22 @@ def format_human(result: dict[str, Any]) -> str:
         )
     if result.get("retest"):
         lines.append(f"retest={json.dumps(result['retest'])}")
+    if result.get("coverage"):
+        cov = result["coverage"]
+        actual = cov.get("actual") or {}
+        lines.append("Coverage (operation-scoped; not a security score):")
+        lines.append(
+            f"  in_scope_discovered={actual.get('in_scope_discovered')} "
+            f"submitted={actual.get('submitted_for_http_observation')} "
+            f"http_obtained={actual.get('http_observation_obtained')} "
+            f"http_not_obtained={actual.get('http_observation_not_obtained')}"
+        )
+        lines.append(
+            f"  probe_no_result={actual.get('probe_no_result')} "
+            f"host_not_reachable={actual.get('host_not_reachable')} "
+            f"discarded={actual.get('discarded_out_of_scope')}"
+        )
+        lines.append(f"  all_correct={cov.get('all_correct')} matches={cov.get('matches')}")
     if result.get("warnings"):
         lines.append(f"warnings={result['warnings']}")
     lines.append(f"duration_ms={result['duration_ms']} operation_id={result['operation_id']}")

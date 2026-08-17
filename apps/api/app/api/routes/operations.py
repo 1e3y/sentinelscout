@@ -10,6 +10,7 @@ from app.models.asset import Asset
 from app.schemas.candidate import SecurityCandidateResponse
 from app.schemas.discovery import AssetResponse, DiscoveryObservationResponse
 from app.schemas.audit import OperationControlSnapshotResponse
+from app.schemas.coverage import OperationCoverageResponse
 from app.schemas.operation import (
     CreateOperationRequest,
     OperationEventResponse,
@@ -17,6 +18,7 @@ from app.schemas.operation import (
 )
 from app.services.operations import (
     create_operation,
+    get_operation_coverage,
     get_operation_or_404,
     list_operation_assets,
     list_operation_candidates,
@@ -171,6 +173,18 @@ def list_observations_endpoint(
         )
         for row in rows
     ]
+
+
+@router.get("/{operation_id}/coverage", response_model=OperationCoverageResponse)
+def get_coverage_endpoint(
+    operation_id: UUID,
+    auth: Annotated[AuthContext, Depends(get_auth_context)],
+    db: Annotated[Session, Depends(get_db)],
+) -> OperationCoverageResponse:
+    payload = get_operation_coverage(
+        db, operation_id=operation_id, user_id=auth.user.id
+    )
+    return OperationCoverageResponse.model_validate(payload)
 
 
 @router.get("/{operation_id}/candidates", response_model=list[SecurityCandidateResponse])

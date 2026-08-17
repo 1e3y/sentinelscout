@@ -33,6 +33,9 @@ class ProbeResult:
     redirected: bool = False
     location_url: str | None = None
     scheme: str | None = None
+    # observed | host_not_reachable | probe_failed | probe_timeout
+    # Absence from the result list is probe_no_result (cause not distinguishable).
+    outcome: str = "observed"
 
 
 class DiscoveryTools(Protocol):

@@ -10,12 +10,18 @@ from sqlalchemy.orm import Session, joinedload
 from app.models import OrganizationMembership
 from app.models.asset import Asset, DiscoveryObservation
 from app.models.candidate import SecurityCandidate
+from app.models.coverage import OperationCoverageSummary
 from app.models.operation import Operation, OperationEvent
 from app.models.operation_controls import TESTING_PROFILE_SAFE_PRODUCTION
 from app.models.target import AuthorizedTarget
 from app.models.user import User
 from app.models.validation import ACTIVE_VALIDATION_STATUSES, ValidationAttempt
 from app.services.audit import record_audit
+from app.services.coverage import (
+    assemble_live_coverage,
+    coverage_payload_from_snapshot,
+    freeze_operation_coverage,
+)
 from app.services.operation_controls import create_control_snapshot
 from app.services.validation_engine.types import method_for_candidate_type
 
@@ -501,6 +507,9 @@ def stop_operation(
                 "testing_profile": operation.testing_profile,
             },
         )
+        freeze_operation_coverage(
+            db, operation, source="frozen", actor_type="user"
+        )
         db.commit()
         return get_operation_or_404(db, operation_id=operation.id, user_id=user_id)
 
@@ -531,3 +540,31 @@ def stop_operation(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail=f"Cannot stop an operation in status '{operation.status}'",
     )
+
+
+def get_operation_coverage(
+    db: Session,
+    *,
+    operation_id: UUID,
+    user_id: UUID,
+) -> dict:
+    operation = get_operation_or_404(db, operation_id=operation_id, user_id=user_id)
+    if operation.status in TERMINAL_STATUSES:
+        existing = db.scalar(
+            select(OperationCoverageSummary).where(
+                OperationCoverageSummary.operation_id == operation.id
+            )
+        )
+        row = freeze_operation_coverage(
+            db,
+            operation,
+            source="recovered",
+            actor_type="system",
+        )
+        if existing is None and row is not None:
+            db.commit()
+            db.refresh(row)
+        if row is not None:
+            return coverage_payload_from_snapshot(db, operation, row)
+    return assemble_live_coverage(db, operation)
+

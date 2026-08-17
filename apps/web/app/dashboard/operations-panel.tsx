@@ -8,6 +8,7 @@ import {
   fetchOperation,
   fetchOperationAssets,
   fetchOperationCandidates,
+  fetchOperationCoverage,
   fetchOperationEvents,
   fetchOperationObservations,
   fetchOperations,
@@ -17,6 +18,7 @@ import {
   stopOperation,
   type AssetResponse,
   type DiscoveryObservationResponse,
+  type OperationCoverageResponse,
   type OperationEventResponse,
   type OperationResponse,
   type SecurityCandidateResponse,
@@ -44,6 +46,7 @@ export function OperationsPanel({ enabled }: Props) {
   const [observations, setObservations] = useState<DiscoveryObservationResponse[]>(
     [],
   );
+  const [coverage, setCoverage] = useState<OperationCoverageResponse | null>(null);
   const [candidates, setCandidates] = useState<SecurityCandidateResponse[]>([]);
   const [validationByCandidate, setValidationByCandidate] = useState<
     Record<string, ValidationAttemptResponse[]>
@@ -76,19 +79,21 @@ export function OperationsPanel({ enabled }: Props) {
       setError("Missing session token");
       return;
     }
-    const [op, nextEvents, nextAssets, nextObservations, nextCandidates] =
+    const [op, nextEvents, nextAssets, nextObservations, nextCandidates, nextCoverage] =
       await Promise.all([
         fetchOperation(token, operationId),
         fetchOperationEvents(token, operationId),
         fetchOperationAssets(token, operationId),
         fetchOperationObservations(token, operationId),
         fetchOperationCandidates(token, operationId),
+        fetchOperationCoverage(token, operationId),
       ]);
     setSelected(op);
     setEvents(nextEvents);
     setAssets(nextAssets);
     setObservations(nextObservations);
     setCandidates(nextCandidates);
+    setCoverage(nextCoverage);
     const attemptEntries = await Promise.all(
       nextCandidates.map(async (candidate) => {
         const attempts = await fetchCandidateValidationAttempts(token, candidate.id);
@@ -362,12 +367,16 @@ export function OperationsPanel({ enabled }: Props) {
                   <dd>{formatTime(selected.completed_at)}</dd>
                 </div>
                 <div>
-                  <dt className="text-zinc-500">Assets discovered</dt>
-                  <dd>{assets.length}</dd>
+                  <dt className="text-zinc-500">In-scope hostnames</dt>
+                  <dd>
+                    {coverage
+                      ? `${coverage.surface.http_observation_obtained}/${coverage.surface.in_scope_discovered} with HTTP observations`
+                      : "—"}
+                  </dd>
                 </div>
                 <div>
                   <dt className="text-zinc-500">Security candidates</dt>
-                  <dd>{candidates.length}</dd>
+                  <dd>{coverage?.follow_up.candidates_generated ?? candidates.length}</dd>
                 </div>
                 {selected.error_message ? (
                   <div>
@@ -477,6 +486,127 @@ export function OperationsPanel({ enabled }: Props) {
             </div>
           ) : null}
 
+          {coverage ? (
+            <div className="space-y-3 border-t border-zinc-100 pt-4">
+              <h4 className="text-sm font-medium tracking-wide text-zinc-800">
+                COVERAGE
+              </h4>
+              <p className="text-sm text-zinc-700">{coverage.headline}</p>
+              <p className="text-xs text-zinc-500">
+                Coverage is not a security outcome. Unique in-scope hostnames
+                are the surface unit. Header capture is a fact about an HTTP
+                observation, not a separate host state. Unsupported classes are
+                capability boundaries, not failed probes.
+              </p>
+              <div>
+                <h5 className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                  Surface coverage
+                </h5>
+                <dl className="mt-2 grid gap-2 text-sm text-zinc-700">
+                  <div>
+                    <dt className="text-zinc-500">In-scope discovered</dt>
+                    <dd>{coverage.surface.in_scope_discovered}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-zinc-500">Submitted for HTTP observation</dt>
+                    <dd>{coverage.surface.submitted_for_http_observation}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-zinc-500">HTTP observation obtained</dt>
+                    <dd>{coverage.surface.http_observation_obtained}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-zinc-500">HTTP observation not obtained</dt>
+                    <dd>{coverage.surface.http_observation_not_obtained}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-zinc-500">Incomplete</dt>
+                    <dd>{coverage.surface.incomplete}</dd>
+                  </div>
+                </dl>
+              </div>
+              <div>
+                <h5 className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                  HTTP evidence (subordinate)
+                </h5>
+                <p className="mt-1 text-sm text-zinc-700">
+                  Response headers captured on{" "}
+                  {coverage.http_evidence.headers_captured}/
+                  {coverage.http_evidence.http_observations} HTTP observations
+                  {coverage.http_evidence.header_evidence_unavailable
+                    ? `; unavailable on ${coverage.http_evidence.header_evidence_unavailable}/${coverage.http_evidence.http_observations}.`
+                    : "."}
+                </p>
+              </div>
+              <div>
+                <h5 className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                  Scope and capability boundaries
+                </h5>
+                <dl className="mt-2 grid gap-2 text-sm text-zinc-700">
+                  <div>
+                    <dt className="text-zinc-500">Configured exclusions</dt>
+                    <dd className="font-mono text-xs">
+                      {coverage.scope_boundaries.configured_exclusions.length > 0
+                        ? coverage.scope_boundaries.configured_exclusions.join(
+                            ", ",
+                          )
+                        : "None"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-zinc-500">Discarded by authorization scope</dt>
+                    <dd>
+                      {coverage.scope_boundaries.discovered_results_discarded}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-zinc-500">Discovery truncated</dt>
+                    <dd>
+                      {coverage.scope_boundaries.discovery_truncated
+                        ? `Yes (${coverage.scope_boundaries.truncated_to} of ${coverage.scope_boundaries.truncated_from})`
+                        : "No"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-zinc-500">Unsupported capability classes</dt>
+                    <dd>
+                      {coverage.capability.unsupported.length} classes in
+                      manifest v{coverage.capability_manifest_version}
+                    </dd>
+                  </div>
+                </dl>
+                <ul className="mt-2 list-disc pl-5 text-xs text-zinc-600">
+                  {coverage.capability.unsupported.map((item) => (
+                    <li key={item.id}>
+                      {item.title}
+                      {item.explanation ? ` — ${item.explanation}` : ""}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <h5 className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                  Security outcomes
+                </h5>
+                <p className="mt-1 text-sm text-zinc-700">
+                  Candidates {coverage.follow_up.candidates_generated}; validations
+                  attempted {coverage.follow_up.validations_attempted} (conclusive{" "}
+                  {coverage.follow_up.validations_conclusive}, inconclusive{" "}
+                  {coverage.follow_up.validations_inconclusive}, failed{" "}
+                  {coverage.follow_up.validations_failed}, not attempted{" "}
+                  {coverage.follow_up.validations_not_attempted}); findings{" "}
+                  {coverage.follow_up.findings}.
+                </p>
+              </div>
+              <p className="text-xs text-zinc-500">
+                Newest HTTP observation:{" "}
+                {formatTime(coverage.freshness.newest_http_observation_at)} ·
+                snapshot {coverage.source}
+                {coverage.frozen_at ? ` at ${formatTime(coverage.frozen_at)}` : ""}
+              </p>
+            </div>
+          ) : null}
+
           <div className="space-y-2">
             <h4 className="text-sm font-medium">Discovered assets</h4>
             {assets.length === 0 ? (
@@ -539,7 +669,8 @@ export function OperationsPanel({ enabled }: Props) {
             </p>
             {candidates.length === 0 ? (
               <p className="text-sm text-zinc-600">
-                No security candidates for this operation.
+                No security candidates were generated from observable surfaces.
+                That is not evidence that the application is secure.
               </p>
             ) : (
               <ul className="divide-y divide-zinc-100 rounded-md border border-zinc-100">

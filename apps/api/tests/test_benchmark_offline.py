@@ -28,14 +28,25 @@ def _ban_live_discovery_tools(monkeypatch) -> None:
 
 
 def test_default_ci_pack_excludes_retest_delta():
-    assert DEFAULT_CI_FIXTURES == ("visible-surface", "naming-traps", "header-surface")
+    assert DEFAULT_CI_FIXTURES == (
+        "visible-surface",
+        "naming-traps",
+        "header-surface",
+        "coverage-gaps",
+    )
     assert "retest-delta" not in DEFAULT_CI_FIXTURES
 
 
 def test_ground_truth_uses_bench_example_namespace():
-    for fixture_id in ("visible-surface", "naming-traps", "retest-delta", "header-surface"):
+    for fixture_id in (
+        "visible-surface",
+        "naming-traps",
+        "retest-delta",
+        "header-surface",
+        "coverage-gaps",
+    ):
         truth = load_ground_truth(fixture_id)
-        assert truth.root == "bench.example"
+        assert truth.root == "bench.example" or truth.root.endswith(".bench.example")
         assert all(
             host.endswith("bench.example") or host == "bench.example" for host in truth.hostnames
         )
@@ -74,6 +85,15 @@ def test_offline_ci_pack_schema_and_report_only_baseline(db_session, monkeypatch
         assert "Scout discovery recall" not in human
         write_json(result, tmp_path / f"{fixture_id}-offline.json")
         results.append(result)
+        if fixture_id == "coverage-gaps":
+            assert result["coverage"]["all_correct"] is True, result["coverage"]["matches"]
+            actual = result["coverage"]["actual"]
+            assert actual["probe_no_result"] == 1
+            assert actual["host_not_reachable"] == 1
+            assert actual["clearance_language"] is False
+            assert actual["http_observation_obtained"] == 4
+            assert actual["header_evidence_unavailable"] == 1
+            assert actual["discarded_out_of_scope"] == 1
 
     pack = compare_pack(results_dir=tmp_path, mode="offline")
     printed = format_compare(pack)
@@ -82,7 +102,7 @@ def test_offline_ci_pack_schema_and_report_only_baseline(db_session, monkeypatch
     assert "REPORT-ONLY" in captured.out
     assert pack["fails_ci"] is False
     assert pack["policy"] == "report_only"
-    assert len(results) == 3
+    assert len(results) == 4
 
 
 def test_offline_mode_does_not_call_subprocess_discovery(db_session, monkeypatch):

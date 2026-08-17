@@ -22,6 +22,8 @@ FORBIDDEN_METRIC_KEYS = frozenset(
         "discovery_recall",
         "asset_recall",
         "accuracy",
+        "percent_secure",
+        "confidence",
     }
 )
 
@@ -104,6 +106,9 @@ def validate_result(result: dict[str, Any]) -> None:
     forbidden = FORBIDDEN_METRIC_KEYS.intersection(_walk_keys(result))
     if forbidden:
         raise ValueError(f"forbidden metric names present: {sorted(forbidden)}")
+
+    if result.get("coverage") is not None and not isinstance(result["coverage"], dict):
+        raise ValueError("coverage must be an object when present")
 
     if result["mode"] == "offline" and result.get("live_discovery") is not None:
         raise ValueError("offline results must not include live_discovery metrics")

@@ -13,6 +13,14 @@ from sqlalchemy.orm import Session, joinedload
 from app.models.asset import Asset, DiscoveryObservation
 from app.models.operation import Operation
 from app.models.target import AuthorizedTarget, TargetScope
+from app.services.coverage import (
+    EXPLICIT_PROBE_OUTCOMES,
+    OBSERVATION_FACTS,
+    OBSERVATION_NOT_OBTAINED,
+    REASON_PROBE_NO_RESULT,
+    explanation_for,
+    parse_truncation_note,
+)
 from app.services.discovery.runner import DiscoveryTools
 from app.services.discovery.scope import filter_hosts_for_scope, normalize_host
 from app.services.http_evidence import evidence_from_probe, observation_metadata
@@ -172,6 +180,7 @@ def run_discovery(
         exclusions=exclusions,
     )
     discarded = len(hosts) - len(in_scope)
+    hostname_assets: dict[str, Asset] = {}
 
     for host in in_scope:
         asset, created = _upsert_asset(
@@ -185,6 +194,7 @@ def run_discovery(
             title=None,
             source="subfinder",
         )
+        hostname_assets[host] = asset
         _add_observation(
             db,
             organization_id=operation.organization_id,
@@ -216,13 +226,37 @@ def run_discovery(
     if should_stop and should_stop():
         raise StopRequested()
 
-    probes = tools.probe_hosts(in_scope)
+    probes = tools.probe_hosts(list(in_scope))
+    submitted = list(in_scope)
     http_assets = 0
+    obtained_hosts: set[str] = set()
+    accounted_hosts: set[str] = set()
+
     for probe in probes:
-        host = normalize_host(probe.url)
+        outcome = getattr(probe, "outcome", "observed") or "observed"
+        host = normalize_host(probe.requested_url or probe.url)
         if host not in in_scope:
-            # Defense in depth: discard out-of-scope probe results.
             discarded += 1
+            continue
+        if outcome in EXPLICIT_PROBE_OUTCOMES:
+            asset = hostname_assets.get(host)
+            _add_observation(
+                db,
+                organization_id=operation.organization_id,
+                operation_id=operation.id,
+                asset_id=asset.id if asset is not None else None,
+                observation_type=OBSERVATION_NOT_OBTAINED,
+                summary=(
+                    f"HTTP observation not obtained for {host} ({outcome})."
+                ),
+                metadata={
+                    "hostname": host,
+                    "reason_code": outcome,
+                    "explanation": explanation_for(outcome),
+                },
+                source="httpx",
+            )
+            accounted_hosts.add(host)
             continue
         normalized_url = _normalize_url(probe.url)
         if not normalized_url:
@@ -298,6 +332,52 @@ def run_discovery(
                 "asset_id": str(asset.id),
             },
         )
+        obtained_hosts.add(host)
+        accounted_hosts.add(host)
+
+    for host in submitted:
+        if host in accounted_hosts:
+            continue
+        asset = hostname_assets.get(host)
+        _add_observation(
+            db,
+            organization_id=operation.organization_id,
+            operation_id=operation.id,
+            asset_id=asset.id if asset is not None else None,
+            observation_type=OBSERVATION_NOT_OBTAINED,
+            summary=f"HTTP observation not obtained for {host}.",
+            metadata={
+                "hostname": host,
+                "reason_code": REASON_PROBE_NO_RESULT,
+                "explanation": explanation_for(REASON_PROBE_NO_RESULT),
+            },
+            source="httpx",
+        )
+
+    truncated, truncated_from, truncated_to = parse_truncation_note(truncation_note)
+    _add_observation(
+        db,
+        organization_id=operation.organization_id,
+        operation_id=operation.id,
+        asset_id=None,
+        observation_type=OBSERVATION_FACTS,
+        summary=(
+            f"Discovery coverage facts: {len(in_scope)} in-scope hostname(s), "
+            f"{len(submitted)} submitted for HTTP observation, "
+            f"{len(obtained_hosts)} HTTP observation(s) obtained."
+        ),
+        metadata={
+            "http_probe_ran": True,
+            "in_scope_discovered": len(in_scope),
+            "submitted_for_http_observation": len(submitted),
+            "http_observation_obtained": len(obtained_hosts),
+            "discarded_out_of_scope": discarded,
+            "truncated": truncated,
+            "truncated_from": truncated_from,
+            "truncated_to": truncated_to,
+        },
+        source="discovery",
+    )
     db.commit()
 
     summary = (

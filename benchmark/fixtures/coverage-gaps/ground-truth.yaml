@@ -1,0 +1,85 @@
+schema_version: 1
+fixture_id: coverage-gaps
+scope:
+  root: coverage.bench.example
+  include_subdomains: true
+  exclusions:
+    - excluded.coverage.bench.example
+default_response_headers: {}
+sites:
+  - hostname: coverage.bench.example
+    path: /
+    html: headers-ok.bench.example/index.html
+    response_headers:
+      Strict-Transport-Security: max-age=31536000
+  - hostname: observed-ok.coverage.bench.example
+    path: /
+    html: headers-ok.bench.example/index.html
+    response_headers:
+      Strict-Transport-Security: max-age=31536000
+  - hostname: headers-unavailable.coverage.bench.example
+    path: /
+    html: headers-missing.bench.example/index.html
+    capture_headers: false
+  - hostname: headers-missing.coverage.bench.example
+    path: /
+    html: headers-missing.bench.example/index.html
+  - hostname: excluded.coverage.bench.example
+    path: /
+    html: headers-ok.bench.example/index.html
+    response_headers:
+      Strict-Transport-Security: max-age=31536000
+assets:
+  - hostname: coverage.bench.example
+    reachable: true
+  - hostname: observed-ok.coverage.bench.example
+    reachable: true
+  - hostname: headers-unavailable.coverage.bench.example
+    reachable: true
+  - hostname: headers-missing.coverage.bench.example
+    reachable: true
+  - hostname: silent.coverage.bench.example
+    reachable: false
+    probe_outcome: no_result
+  - hostname: down.coverage.bench.example
+    reachable: false
+    probe_outcome: host_not_reachable
+candidates:
+  - id: coverage-missing-hsts
+    hostname: headers-missing.coverage.bench.example
+    candidate_type: security_header_observation
+    expected: present
+    desirable: true
+    validation: inconclusive
+not_candidates:
+  - hostname: coverage.bench.example
+    candidate_type: security_header_observation
+  - hostname: coverage.bench.example
+    candidate_type: staging_dev_exposed
+  - hostname: observed-ok.coverage.bench.example
+    candidate_type: security_header_observation
+  - hostname: headers-unavailable.coverage.bench.example
+    candidate_type: security_header_observation
+  - hostname: silent.coverage.bench.example
+    candidate_type: security_header_observation
+  - hostname: down.coverage.bench.example
+    candidate_type: security_header_observation
+overlaps: []
+known_misses: []
+retest: []
+coverage:
+  in_scope_discovered: 6
+  submitted_for_http_observation: 6
+  http_observation_obtained: 4
+  http_observation_not_obtained: 2
+  probe_no_result: 1
+  host_not_reachable: 1
+  headers_captured: 3
+  header_evidence_unavailable: 1
+  discarded_out_of_scope: 1
+  configured_exclusions:
+    - excluded.coverage.bench.example
+  validations_inconclusive: 1
+  findings: 0
+  validation_force_redirect:
+    - headers-missing.coverage.bench.example

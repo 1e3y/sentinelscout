@@ -31,6 +31,7 @@ COMPARE_PATHS = (
     ("validation", "support_rate"),
     ("validation", "disagreements"),
     ("retest",),
+    ("coverage", "all_correct"),
     ("live_discovery", "live_discovery_asset_recall"),
     ("live_discovery", "used_httpx_binary"),
     ("live_discovery", "subfinder_public_host_count"),

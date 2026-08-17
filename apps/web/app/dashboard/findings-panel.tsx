@@ -144,6 +144,7 @@ export function FindingsPanel({ enabled }: Props) {
       ) : findings.length === 0 ? (
         <p className="text-sm text-zinc-600">
           No findings yet. Promote a supported candidate after safe validation.
+          Absence of findings is not a security clearance.
         </p>
       ) : (
         <div className="grid gap-4 md:grid-cols-[14rem_1fr]">

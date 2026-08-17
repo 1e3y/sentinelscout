@@ -8,6 +8,7 @@ import subprocess
 
 from app.benchmark.ground_truth import GroundTruth
 from app.benchmark.http_loopback import LoopbackSafeHttpClient
+from app.services.coverage import EXPLICIT_PROBE_OUTCOMES
 from app.services.discovery.runner import DiscoveryError, ProbeResult
 from app.services.http_evidence import (
     evidence_from_probe,
@@ -61,6 +62,9 @@ class SeededLoopbackDiscoveryTools:
         self.client = client
         self.path_by_host: dict[str, str] = {}
         self.capture_headers_by_host: dict[str, bool] = {}
+        self.probe_outcome_by_host: dict[str, str] = {
+            row.hostname: row.probe_outcome for row in truth.assets
+        }
         for site in truth.sites:
             if site.hostname not in self.path_by_host:
                 self.path_by_host[site.hostname] = site.path or "/"
@@ -75,6 +79,19 @@ class SeededLoopbackDiscoveryTools:
     def probe_hosts(self, hosts: list[str]) -> list[ProbeResult]:
         results: list[ProbeResult] = []
         for host in hosts:
+            outcome = self.probe_outcome_by_host.get(host, "observed")
+            if outcome == "no_result":
+                continue
+            if outcome in EXPLICIT_PROBE_OUTCOMES:
+                results.append(
+                    ProbeResult(
+                        url=f"https://{host}/",
+                        status_code=None,
+                        title="",
+                        outcome=outcome,
+                    )
+                )
+                continue
             path = self.path_by_host.get(host, "/")
             canonical = f"https://{host}{path}"
             obs = self.client.fetch(canonical, method="GET")

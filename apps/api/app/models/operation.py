@@ -21,6 +21,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.db import Base
 
 if TYPE_CHECKING:
+    from app.models.coverage import OperationCoverageSummary
     from app.models.operation_controls import OperationControlSnapshot
     from app.models.organization import Organization
     from app.models.target import AuthorizedTarget
@@ -82,6 +83,12 @@ class Operation(Base):
     )
     control_snapshot: Mapped[OperationControlSnapshot | None] = relationship(
         "OperationControlSnapshot",
+        back_populates="operation",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    coverage_summary: Mapped[OperationCoverageSummary | None] = relationship(
+        "OperationCoverageSummary",
         back_populates="operation",
         uselist=False,
         cascade="all, delete-orphan",

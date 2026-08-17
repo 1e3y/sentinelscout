@@ -17,6 +17,7 @@ from app.models import (  # noqa: F401
     Finding,
     MonitoringConfiguration,
     OperationControlSnapshot,
+    OperationCoverageSummary,
     RateLimitCounter,
     RetestAttempt,
     SecurityCandidate,

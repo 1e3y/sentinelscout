@@ -5,12 +5,144 @@ from __future__ import annotations
 from typing import Any
 
 from app.benchmark.ground_truth import GroundTruth
+from app.services.coverage import (
+    CLEARANCE_HEADLINE_RE,
+    REASON_HOST_NOT_REACHABLE,
+    REASON_PROBE_NO_RESULT,
+)
 
 
 def _ratio(num: int, den: int) -> float | None:
     if den <= 0:
         return None
     return round(num / den, 4)
+
+
+def _eq(expected: int | None, actual: int) -> bool | None:
+    if expected is None:
+        return None
+    return expected == actual
+
+
+def _score_coverage(
+    *,
+    truth: GroundTruth,
+    coverage: dict[str, Any] | None,
+    frozen_surface: dict[str, Any] | None,
+) -> dict[str, Any]:
+    payload = coverage or {}
+    surface = dict(payload.get("surface") or {})
+    evidence = dict(payload.get("http_evidence") or {})
+    scope = dict(payload.get("scope_boundaries") or {})
+    follow_up = dict(payload.get("follow_up") or {})
+    headline = str(payload.get("headline") or "")
+    not_obtained = list(
+        (surface.get("hostnames") or {}).get("http_observation_not_obtained") or []
+    )
+    probe_no_result = sum(
+        1 for item in not_obtained if item.get("reason_code") == REASON_PROBE_NO_RESULT
+    )
+    host_not_reachable = sum(
+        1 for item in not_obtained if item.get("reason_code") == REASON_HOST_NOT_REACHABLE
+    )
+    actual = {
+        "in_scope_discovered": int(surface.get("in_scope_discovered") or 0),
+        "submitted_for_http_observation": int(
+            surface.get("submitted_for_http_observation") or 0
+        ),
+        "http_observation_obtained": int(surface.get("http_observation_obtained") or 0),
+        "http_observation_not_obtained": int(
+            surface.get("http_observation_not_obtained") or 0
+        ),
+        "probe_no_result": probe_no_result,
+        "host_not_reachable": host_not_reachable,
+        "headers_captured": int(evidence.get("headers_captured") or 0),
+        "header_evidence_unavailable": int(
+            evidence.get("header_evidence_unavailable") or 0
+        ),
+        "discarded_out_of_scope": int(scope.get("discovered_results_discarded") or 0),
+        "configured_exclusions": list(scope.get("configured_exclusions") or []),
+        "validations_inconclusive": int(follow_up.get("validations_inconclusive") or 0),
+        "findings": int(follow_up.get("findings") or 0),
+        "candidates_generated": int(follow_up.get("candidates_generated") or 0),
+        "headline": headline,
+        "clearance_language": bool(CLEARANCE_HEADLINE_RE.search(headline)),
+        "frozen_surface_matches_live": (
+            frozen_surface is None
+            or {
+                key: surface.get(key)
+                for key in (
+                    "in_scope_discovered",
+                    "submitted_for_http_observation",
+                    "http_observation_obtained",
+                    "http_observation_not_obtained",
+                    "incomplete",
+                )
+            }
+            == {
+                key: frozen_surface.get(key)
+                for key in (
+                    "in_scope_discovered",
+                    "submitted_for_http_observation",
+                    "http_observation_obtained",
+                    "http_observation_not_obtained",
+                    "incomplete",
+                )
+            }
+        ),
+    }
+    expected = truth.coverage
+    matches: dict[str, bool | None] = {}
+    if expected is not None:
+        matches = {
+            "in_scope_discovered": _eq(
+                expected.in_scope_discovered, actual["in_scope_discovered"]
+            ),
+            "submitted_for_http_observation": _eq(
+                expected.submitted_for_http_observation,
+                actual["submitted_for_http_observation"],
+            ),
+            "http_observation_obtained": _eq(
+                expected.http_observation_obtained, actual["http_observation_obtained"]
+            ),
+            "http_observation_not_obtained": _eq(
+                expected.http_observation_not_obtained,
+                actual["http_observation_not_obtained"],
+            ),
+            "probe_no_result": _eq(expected.probe_no_result, actual["probe_no_result"]),
+            "host_not_reachable": _eq(
+                expected.host_not_reachable, actual["host_not_reachable"]
+            ),
+            "headers_captured": _eq(expected.headers_captured, actual["headers_captured"]),
+            "header_evidence_unavailable": _eq(
+                expected.header_evidence_unavailable,
+                actual["header_evidence_unavailable"],
+            ),
+            "discarded_out_of_scope": _eq(
+                expected.discarded_out_of_scope, actual["discarded_out_of_scope"]
+            ),
+            "configured_exclusions": sorted(expected.configured_exclusions)
+            == sorted(str(item) for item in actual["configured_exclusions"]),
+            "validations_inconclusive": _eq(
+                expected.validations_inconclusive, actual["validations_inconclusive"]
+            ),
+            "findings": _eq(expected.findings, actual["findings"]),
+            "no_clearance_language": actual["clearance_language"] is False,
+        }
+    all_ok = True
+    for value in matches.values():
+        if value is False:
+            all_ok = False
+            break
+    return {
+        "note": (
+            "Operation-scoped coverage accounting. Independent of candidate precision. "
+            "Not a security score."
+        ),
+        "actual": actual,
+        "matches": matches,
+        "all_correct": all_ok if expected is not None else None,
+    }
 
 
 def score(
@@ -28,6 +160,8 @@ def score(
     used_httpx_binary: bool | None = None,
     git_sha: str | None = None,
     operation_id: str | None = None,
+    coverage: dict[str, Any] | None = None,
+    frozen_surface: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     expected_hosts = set(truth.expected_reachable_hosts)
     expected_present = {
@@ -130,6 +264,12 @@ def score(
         "retest": None,
         "warnings": list(warnings),
     }
+
+    result["coverage"] = _score_coverage(
+        truth=truth,
+        coverage=coverage,
+        frozen_surface=frozen_surface,
+    )
 
     if mode == "local_live":
         probed = {h.lower().rstrip(".") for h in (live_probed_hosts or [])}

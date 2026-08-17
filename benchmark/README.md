@@ -67,6 +67,7 @@ treat the DNS label `test` as a staging marker.
 | `visible-surface` | yes | Obvious reachable admin / staging / auth / Jenkins surfaces; `www` missing HSTS is a scored header observation |
 | `naming-traps` | yes | Marker-category traps and recall anchors (`devshop`, `administrator-training`, dashboard title, `grafana-training` / `jenkins-docs`, plus exact-label `grafana` / `jenkins`) |
 | `header-surface` | yes | HSTS present / missing / JSON / capture-unavailable / redirect-final-only |
+| `coverage-gaps` | yes | Coverage accounting: all-observed, probe no-result, known-unreachable, header capture unavailable, validation inconclusive, excluded host |
 | `retest-delta` | **no** | Fixture C: take staging down, expect a passing retest. Run explicitly until the harness is trusted |
 
 ## Commands
@@ -74,13 +75,15 @@ treat the DNS label `test` as a staging marker.
 From `apps/api` (Postgres required; uses `DATABASE_URL`):
 
 ```bash
-# Default CI pack (A + B + header-surface), offline
+# Default CI pack (A + B + header-surface + coverage-gaps), offline
 uv run python -m app.benchmark run --all --mode offline --save
 
 # Single fixture
 uv run python -m app.benchmark run --fixture visible-surface --mode offline --save
 uv run python -m app.benchmark run --fixture naming-traps --mode offline --save
 uv run python -m app.benchmark run --fixture header-surface --mode offline --save
+
+uv run python -m app.benchmark run --fixture coverage-gaps --mode offline --save
 
 # Fixture C — explicit only, not the default CI pack
 uv run python -m app.benchmark run --fixture retest-delta --mode offline --save
@@ -92,7 +95,7 @@ uv run python -m app.benchmark compare --against ../../benchmark/results/baselin
 uv run python -m app.benchmark serve --fixture visible-surface --port 18080
 ```
 
-`--all` is **only** `visible-surface`, `naming-traps`, and `header-surface`.
+`--all` is **only** `visible-surface`, `naming-traps`, `header-surface`, and `coverage-gaps`.
 
 CI fails if the benchmark crashes, fixtures fail to start, schema/result
 generation fails, or tests fail. CI does **not** fail because candidate/asset

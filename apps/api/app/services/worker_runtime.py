@@ -25,6 +25,7 @@ from app.models.operation import Operation
 from app.services.audit import record_audit
 from app.services.candidate_engine import generate_candidates_for_operation
 from app.services.change_detection import detect_and_persist_changes
+from app.services.coverage import freeze_operation_coverage
 from app.services.discovery.execute import (
     AuthorizationExecutionError,
     StopRequested,
@@ -120,6 +121,7 @@ def _mark_stopped(db: Session, operation: Operation, *, summary: str) -> Operati
             "source": operation.source,
         },
     )
+    freeze_operation_coverage(db, operation, source="frozen", actor_type="worker")
     db.commit()
     db.refresh(operation)
     return operation
@@ -159,6 +161,7 @@ def _mark_failed(
             "source": operation.source,
         },
     )
+    freeze_operation_coverage(db, operation, source="frozen", actor_type="worker")
     db.commit()
     db.refresh(operation)
     return operation
@@ -191,6 +194,7 @@ def _mark_completed(db: Session, operation: Operation) -> Operation:
             "testing_profile": operation.testing_profile,
         },
     )
+    freeze_operation_coverage(db, operation, source="frozen", actor_type="worker")
     db.commit()
     db.refresh(operation)
     return operation
@@ -204,6 +208,10 @@ def execute_discovery_job(
     """Run authorized asset discovery for a claimed (running) operation."""
     operation = _reload(db, operation_id)
     if operation.status != "running":
+        if operation.status in {"completed", "stopped", "failed"}:
+            freeze_operation_coverage(db, operation, source="recovered", actor_type="worker")
+            db.commit()
+            db.refresh(operation)
         return operation
 
     def should_stop() -> bool:
@@ -245,11 +253,15 @@ def execute_discovery_job(
         operation = _reload(db, operation_id)
         if operation.status != "stopped":
             return _mark_stopped(db, operation, summary="Scout operation stopped.")
+        freeze_operation_coverage(db, operation, source="recovered", actor_type="worker")
+        db.commit()
         return operation
     except AuthorizationExecutionError:
         logger.warning("authorization failure for operation %s", operation_id)
         operation = _reload(db, operation_id)
         if operation.status in {"completed", "stopped", "failed"}:
+            freeze_operation_coverage(db, operation, source="recovered", actor_type="worker")
+            db.commit()
             return operation
         return _mark_failed(
             db,
@@ -269,12 +281,16 @@ def execute_discovery_job(
         logger.exception("discovery failed for operation %s", operation_id)
         operation = _reload(db, operation_id)
         if operation.status in {"completed", "stopped", "failed"}:
+            freeze_operation_coverage(db, operation, source="recovered", actor_type="worker")
+            db.commit()
             return operation
         return _mark_failed(db, operation, error_code=code, error_message=public)
     except Exception:
         logger.exception("unexpected discovery failure for operation %s", operation_id)
         operation = _reload(db, operation_id)
         if operation.status in {"completed", "stopped", "failed"}:
+            freeze_operation_coverage(db, operation, source="recovered", actor_type="worker")
+            db.commit()
             return operation
         return _mark_failed(db, operation)
 

@@ -42,10 +42,14 @@ class LoopbackSafeHttpClient:
     ) -> None:
         self.port = port
         self.down_hosts = down_hosts if down_hosts is not None else set()
+        self.redirect_hosts: set[str] = set()
         self._timeout = timeout_seconds
 
     def mark_down(self, hostname: str) -> None:
         self.down_hosts.add(hostname.lower().rstrip("."))
+
+    def mark_redirect(self, hostname: str) -> None:
+        self.redirect_hosts.add(hostname.lower().rstrip("."))
 
     def fetch(self, url: str, *, method: str = "GET") -> SafeHttpObservation:
         method_upper = method.upper()
@@ -97,7 +101,7 @@ class LoopbackSafeHttpClient:
             raw_headers=dict(response.headers),
             requested_url=target,
             final_url=final_url,
-            redirected=bool(response.history),
+            redirected=bool(response.history) or host in self.redirect_hosts,
             content_type=raw_content_type or None,
         )
         status = response.status_code
@@ -113,7 +117,7 @@ class LoopbackSafeHttpClient:
             content_type=evidence.content_type,
             requested_url=evidence.requested_url,
             final_url=evidence.final_url,
-            redirected=evidence.redirected,
+            redirected=bool(response.history) or host in self.redirect_hosts,
             location_url=evidence.location_url,
         )
 

@@ -42,6 +42,7 @@ _AUDIT_METADATA_ALLOWLIST = frozenset(
         "previous_status",
         "new_status",
         "reason",
+        "capability_manifest_version",
     }
 )
 

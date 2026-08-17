@@ -1,0 +1,77 @@
+{
+  "candidates": {
+    "emitted": 1,
+    "expected_present": 1,
+    "false_positives_vs_not_candidates": [],
+    "misses": [],
+    "precision_desirable": 1.0,
+    "precision_rule_faithful": 1.0,
+    "recall": 1.0,
+    "unexpected": []
+  },
+  "coverage": {
+    "actual": {
+      "candidates_generated": 1,
+      "clearance_language": false,
+      "configured_exclusions": [
+        "excluded.coverage.bench.example"
+      ],
+      "discarded_out_of_scope": 1,
+      "findings": 0,
+      "frozen_surface_matches_live": true,
+      "header_evidence_unavailable": 1,
+      "headers_captured": 3,
+      "headline": "Scout evaluated 4/6 in-scope hostnames with usable HTTP observations using 10 supported check classes. 2 in-scope hostname(s) produced no usable HTTP observation. Response headers were captured on 3/4 HTTP observations; header evidence was unavailable on 1/4. 1 discovered result(s) were discarded by authorization scope. 12 capability class(es) are outside current Scout capability. No findings were promoted. That is not evidence that the application is secure.",
+      "host_not_reachable": 1,
+      "http_observation_not_obtained": 2,
+      "http_observation_obtained": 4,
+      "in_scope_discovered": 6,
+      "probe_no_result": 1,
+      "submitted_for_http_observation": 6,
+      "validations_inconclusive": 1
+    },
+    "all_correct": true,
+    "matches": {
+      "configured_exclusions": true,
+      "discarded_out_of_scope": true,
+      "findings": true,
+      "header_evidence_unavailable": true,
+      "headers_captured": true,
+      "host_not_reachable": true,
+      "http_observation_not_obtained": true,
+      "http_observation_obtained": true,
+      "in_scope_discovered": true,
+      "no_clearance_language": true,
+      "probe_no_result": true,
+      "submitted_for_http_observation": true,
+      "validations_inconclusive": true
+    },
+    "note": "Operation-scoped coverage accounting. Independent of candidate precision. Not a security score."
+  },
+  "duration_ms": 385,
+  "fixture_id": "coverage-gaps",
+  "git_sha": "570d29f5ebb8420117dc9874c7d657f543fab8e1",
+  "known_misses": [],
+  "live_discovery": null,
+  "mode": "offline",
+  "operation_id": "ef072353-d542-4ea4-8f0d-b41830fb179c",
+  "overlaps": [],
+  "pipeline_assets": {
+    "expected": 4,
+    "extra": [],
+    "found": 4,
+    "missing": [],
+    "note": "Offline/local seeded-host pipeline: whether Scout scoped, probed, persisted, and processed hosts it was handed. Not internet discovery recall.",
+    "pipeline_asset_precision": 1.0,
+    "pipeline_asset_recall": 1.0
+  },
+  "retest": null,
+  "schema_version": 1,
+  "validation": {
+    "disagreements": [],
+    "expected_supported": 0,
+    "support_rate": null,
+    "supported": 0
+  },
+  "warnings": []
+}

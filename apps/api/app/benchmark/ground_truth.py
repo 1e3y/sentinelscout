@@ -23,6 +23,30 @@ class SiteSpec:
 
 
 @dataclass(frozen=True)
+class AssetSpec:
+    hostname: str
+    reachable: bool
+    probe_outcome: str
+
+
+@dataclass(frozen=True)
+class CoverageExpectation:
+    in_scope_discovered: int | None = None
+    submitted_for_http_observation: int | None = None
+    http_observation_obtained: int | None = None
+    http_observation_not_obtained: int | None = None
+    probe_no_result: int | None = None
+    host_not_reachable: int | None = None
+    headers_captured: int | None = None
+    header_evidence_unavailable: int | None = None
+    discarded_out_of_scope: int | None = None
+    configured_exclusions: tuple[str, ...] = ()
+    validations_inconclusive: int | None = None
+    findings: int | None = None
+    validation_force_redirect: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class CandidateSpec:
     id: str
     hostname: str
@@ -49,21 +73,30 @@ class GroundTruth:
     include_subdomains: bool
     exclusions: list[str]
     sites: tuple[SiteSpec, ...]
-    assets: tuple[tuple[str, bool], ...]
+    assets: tuple[AssetSpec, ...]
     candidates: tuple[CandidateSpec, ...]
     not_candidates: tuple[tuple[str, str], ...]
     overlaps: tuple[tuple[str, tuple[str, ...]], ...]
     known_misses: tuple[dict[str, Any], ...]
     retests: tuple[RetestSpec, ...]
     raw: dict[str, Any] = field(repr=False)
+    coverage: CoverageExpectation | None = None
 
     @property
     def hostnames(self) -> list[str]:
-        return list(dict.fromkeys(site.hostname for site in self.sites))
+        from_sites = [site.hostname for site in self.sites]
+        from_assets = [row.hostname for row in self.assets]
+        return list(dict.fromkeys([*from_sites, *from_assets]))
 
     @property
     def expected_reachable_hosts(self) -> list[str]:
-        return [host for host, reachable in self.assets if reachable]
+        return [row.hostname for row in self.assets if row.reachable]
+
+
+def _opt_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    return int(value)
 
 
 def ground_truth_path(fixture_id: str) -> Path:
@@ -106,7 +139,14 @@ def load_ground_truth(fixture_id: str) -> GroundTruth:
         for row in raw.get("sites") or []
     )
     assets = tuple(
-        (str(row["hostname"]).lower().rstrip("."), bool(row.get("reachable", True)))
+        AssetSpec(
+            hostname=str(row["hostname"]).lower().rstrip("."),
+            reachable=bool(row.get("reachable", True)),
+            probe_outcome=str(
+                row.get("probe_outcome")
+                or ("observed" if row.get("reachable", True) else "no_result")
+            ),
+        )
         for row in raw.get("assets") or []
     )
     candidates = tuple(
@@ -144,6 +184,40 @@ def load_ground_truth(fixture_id: str) -> GroundTruth:
         )
         for row in raw.get("retest") or []
     )
+    coverage_raw = raw.get("coverage") or None
+    coverage = None
+    if isinstance(coverage_raw, dict):
+        coverage = CoverageExpectation(
+            in_scope_discovered=_opt_int(coverage_raw.get("in_scope_discovered")),
+            submitted_for_http_observation=_opt_int(
+                coverage_raw.get("submitted_for_http_observation")
+            ),
+            http_observation_obtained=_opt_int(
+                coverage_raw.get("http_observation_obtained")
+            ),
+            http_observation_not_obtained=_opt_int(
+                coverage_raw.get("http_observation_not_obtained")
+            ),
+            probe_no_result=_opt_int(coverage_raw.get("probe_no_result")),
+            host_not_reachable=_opt_int(coverage_raw.get("host_not_reachable")),
+            headers_captured=_opt_int(coverage_raw.get("headers_captured")),
+            header_evidence_unavailable=_opt_int(
+                coverage_raw.get("header_evidence_unavailable")
+            ),
+            discarded_out_of_scope=_opt_int(coverage_raw.get("discarded_out_of_scope")),
+            configured_exclusions=tuple(
+                str(item).lower().rstrip(".")
+                for item in (coverage_raw.get("configured_exclusions") or [])
+            ),
+            validations_inconclusive=_opt_int(
+                coverage_raw.get("validations_inconclusive")
+            ),
+            findings=_opt_int(coverage_raw.get("findings")),
+            validation_force_redirect=tuple(
+                str(item).lower().rstrip(".")
+                for item in (coverage_raw.get("validation_force_redirect") or [])
+            ),
+        )
     return GroundTruth(
         schema_version=int(raw.get("schema_version") or 1),
         fixture_id=str(raw["fixture_id"]),
@@ -157,5 +231,6 @@ def load_ground_truth(fixture_id: str) -> GroundTruth:
         overlaps=overlaps,
         known_misses=tuple(raw.get("known_misses") or []),
         retests=retests,
+        coverage=coverage,
         raw=raw,
     )

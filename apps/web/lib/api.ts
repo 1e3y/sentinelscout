@@ -94,6 +94,84 @@ export type OperationResponse = {
   control_snapshot: OperationControlSnapshotResponse | null;
 };
 
+export type CoverageRatio = {
+  numerator: number;
+  denominator: number;
+  value: number;
+};
+
+export type CoverageGap = {
+  hostname?: string;
+  reason_code: string;
+  explanation: string;
+  count?: number;
+};
+
+export type OperationCoverageResponse = {
+  schema_version: number;
+  source: string;
+  frozen_at: string | null;
+  operation_status_at_freeze: string | null;
+  capability_manifest_version: number;
+  capability: {
+    version?: number;
+    testing_profile?: string;
+    supported: Array<{ id: string; title: string; explanation?: string }>;
+    unsupported: Array<{ id: string; title: string; explanation?: string }>;
+  };
+  surface: {
+    unit: string;
+    in_scope_discovered: number;
+    submitted_for_http_observation: number;
+    http_observation_obtained: number;
+    http_observation_not_obtained: number;
+    incomplete: number;
+    hostnames?: Record<string, unknown>;
+    ratios?: Record<string, CoverageRatio | null>;
+  };
+  http_evidence: {
+    unit: string;
+    http_observations: number;
+    headers_captured: number;
+    header_evidence_unavailable: number;
+    redirect_header_evidence_unusable: number;
+    hostnames?: Record<string, unknown>;
+    ratios?: Record<string, CoverageRatio | null>;
+  };
+  scope_boundaries: {
+    configured_exclusions: string[];
+    include_subdomains: boolean;
+    discovered_results_discarded: number;
+    discovery_truncated: boolean;
+    truncated_from: number | null;
+    truncated_to: number | null;
+    gaps?: CoverageGap[];
+  };
+  freshness: {
+    oldest_http_observation_at: string | null;
+    newest_http_observation_at: string | null;
+    operation_completed_at: string | null;
+    operation_stopped_at?: string | null;
+    operation_failed_at?: string | null;
+  };
+  headline: string;
+  follow_up: {
+    candidates_generated: number;
+    validations_attempted: number;
+    validations_conclusive: number;
+    validations_inconclusive: number;
+    validations_failed: number;
+    validations_not_attempted: number;
+    findings: number;
+    retests_attempted: number;
+    retests_passed: number;
+    retests_failed: number;
+    retests_inconclusive: number;
+    retests_error: number;
+    gaps: CoverageGap[];
+  };
+};
+
 export type MonitoringConfigurationResponse = {
   id: string | null;
   organization_id: string;
@@ -417,6 +495,16 @@ export function fetchOperationObservations(
 ): Promise<DiscoveryObservationResponse[]> {
   return apiFetch<DiscoveryObservationResponse[]>(
     `/v1/operations/${operationId}/observations`,
+    token,
+  );
+}
+
+export function fetchOperationCoverage(
+  token: string,
+  operationId: string,
+): Promise<OperationCoverageResponse> {
+  return apiFetch<OperationCoverageResponse>(
+    `/v1/operations/${operationId}/coverage`,
     token,
   );
 }
