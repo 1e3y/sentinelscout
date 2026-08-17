@@ -1,0 +1,59 @@
+{
+  "candidates": {
+    "emitted": 10,
+    "expected_present": 10,
+    "false_positives_vs_not_candidates": [],
+    "misses": [],
+    "precision_desirable": 1.0,
+    "precision_rule_faithful": 1.0,
+    "recall": 1.0,
+    "unexpected": []
+  },
+  "duration_ms": 1545,
+  "fixture_id": "naming-traps",
+  "git_sha": "2adf190c6efffcfe4c07e656665f3c31532e5dc8",
+  "known_misses": [
+    {
+      "class": "security_header_observation",
+      "count_in_recall": false,
+      "hostname": "www.bench.example",
+      "id": "missing-hsts-www",
+      "reason": "Discovery does not currently persist security_headers_missing."
+    }
+  ],
+  "live_discovery": null,
+  "mode": "offline",
+  "operation_id": "589ff72a-5ac4-40a2-8751-42f708fd2e91",
+  "overlaps": [
+    {
+      "complete": true,
+      "emitted_types": [
+        "sensitive_service_exposed",
+        "exposed_admin_interface"
+      ],
+      "expected_types": [
+        "sensitive_service_exposed",
+        "exposed_admin_interface"
+      ],
+      "hostname": "jenkins.bench.example"
+    }
+  ],
+  "pipeline_assets": {
+    "expected": 21,
+    "extra": [],
+    "found": 21,
+    "missing": [],
+    "note": "Offline/local seeded-host pipeline: whether Scout scoped, probed, persisted, and processed hosts it was handed. Not internet discovery recall.",
+    "pipeline_asset_precision": 1.0,
+    "pipeline_asset_recall": 1.0
+  },
+  "retest": null,
+  "schema_version": 1,
+  "validation": {
+    "disagreements": [],
+    "expected_supported": 10,
+    "support_rate": 1.0,
+    "supported": 10
+  },
+  "warnings": []
+}

@@ -2,10 +2,12 @@
 
 Authorized autonomous black-box security assessment platform.
 
-## Current scope (through Milestone 12 + staging deploy prep)
+## Current scope (through Milestone 15)
 
 Staging host plan: **Vercel (web) + Railway (API, worker, scheduler, Postgres)**.
 Deploy config lives under `apps/api/Dockerfile`, `deploy/railway/`, `apps/web/vercel.json`, and [`docs/staging.md`](docs/staging.md).
+
+Offline evaluation harness: [`benchmark/README.md`](benchmark/README.md) (`python -m app.benchmark`). CI is offline-only against `bench.example` fixtures.
 
 - Next.js frontend with Clerk sign-in
 - FastAPI backend that independently verifies Clerk JWTs
@@ -35,6 +37,8 @@ The frontend is **not** a security boundary.
 - **Findings / retest:** promote from supported candidates; resolve only after a passing retest
 - **Audit / controls:** who acted, authorized boundary at launch, evidence provenance without secret metadata
 - **Ops readiness:** `/health` liveness, `/ready` DB/config checks, structured logs, org/user rate limits
+- **Benchmark (M14):** loopback fixtures + explicit ground truth; offline CI pack `visible-surface` + `naming-traps`; report-only baseline diffs. Offline metrics are `pipeline_asset_precision` / `pipeline_asset_recall` (not discovery recall).
+- **Candidate matching (M15):** token-aware hostnames with marker categories (role/env vs named product vs short infra); stronger admin/auth/sensitive emission thresholds
 
 ## Prerequisites
 

@@ -1,0 +1,56 @@
+{
+  "candidates": {
+    "emitted": 1,
+    "expected_present": 1,
+    "false_positives_vs_not_candidates": [],
+    "misses": [],
+    "precision_desirable": 1.0,
+    "precision_rule_faithful": 1.0,
+    "recall": 1.0,
+    "unexpected": []
+  },
+  "duration_ms": 347,
+  "fixture_id": "retest-delta",
+  "git_sha": "2adf190c6efffcfe4c07e656665f3c31532e5dc8",
+  "known_misses": [
+    {
+      "class": "security_header_observation",
+      "count_in_recall": false,
+      "hostname": "www.bench.example",
+      "id": "missing-hsts-www",
+      "reason": "Discovery does not currently persist security_headers_missing."
+    }
+  ],
+  "live_discovery": null,
+  "mode": "offline",
+  "operation_id": "e8f0a29b-19a1-4f50-9a32-53ed6d1dd347",
+  "overlaps": [],
+  "pipeline_assets": {
+    "expected": 3,
+    "extra": [],
+    "found": 3,
+    "missing": [],
+    "note": "Offline/local seeded-host pipeline: whether Scout scoped, probed, persisted, and processed hosts it was handed. Not internet discovery recall.",
+    "pipeline_asset_precision": 1.0,
+    "pipeline_asset_recall": 1.0
+  },
+  "retest": {
+    "all_correct": true,
+    "cases": [
+      {
+        "actual": "passed",
+        "candidate_id": "staging-exposed",
+        "correct": true,
+        "expected": "passed"
+      }
+    ]
+  },
+  "schema_version": 1,
+  "validation": {
+    "disagreements": [],
+    "expected_supported": 1,
+    "support_rate": 1.0,
+    "supported": 1
+  },
+  "warnings": []
+}

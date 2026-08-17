@@ -55,19 +55,11 @@ export function OperationsPanel({ enabled }: Props) {
 
   const visibleEvents = events.filter((event) => event.operation_id === selectedId);
   const verifiedTargets = targets.filter((target) => target.status === "verified");
+  const resolvedCreateTargetId = verifiedTargets.some((target) => target.id === createTargetId)
+    ? createTargetId
+    : (verifiedTargets[0]?.id ?? "");
   const isActive =
     selected?.status === "queued" || selected?.status === "running";
-
-  // Auto-sync selection with available verified targets
-  useEffect(() => {
-    if (verifiedTargets.length > 0) {
-      if (!createTargetId || !verifiedTargets.some((t) => t.id === createTargetId)) {
-        setCreateTargetId(verifiedTargets[0].id);
-      }
-    } else {
-      setCreateTargetId("");
-    }
-  }, [targets, createTargetId, verifiedTargets]);
 
   async function withToken<T>(fn: (token: string) => Promise<T>): Promise<T | null> {
     const token = await getToken();
@@ -241,13 +233,13 @@ export function OperationsPanel({ enabled }: Props) {
         className="flex flex-col gap-2 sm:flex-row sm:items-center"
         onSubmit={(event) => {
           event.preventDefault();
-          if (!createTargetId) return;
+          if (!resolvedCreateTargetId) return;
           startTransition(async () => {
             setError(null);
             setMessage(null);
             try {
               const created = await withToken((token) =>
-                createOperation(token, createTargetId),
+                createOperation(token, resolvedCreateTargetId),
               );
               if (!created) return;
               setMessage(`Queued operation ${created.id}`);
@@ -266,7 +258,7 @@ export function OperationsPanel({ enabled }: Props) {
         }}
       >
         <select
-          value={createTargetId}
+          value={resolvedCreateTargetId}
           onChange={(event) => setCreateTargetId(event.target.value)}
           className="min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm"
           required

@@ -1,0 +1,50 @@
+schema_version: 1
+fixture_id: retest-delta
+scope:
+  root: bench.example
+  include_subdomains: true
+  exclusions: []
+sites:
+  - hostname: bench.example
+    path: /
+    html: bench.example/index.html
+  - hostname: www.bench.example
+    path: /
+    html: www.bench.example/index.html
+  - hostname: staging.bench.example
+    path: /
+    html: staging.bench.example/index.html
+assets:
+  - hostname: bench.example
+    reachable: true
+  - hostname: www.bench.example
+    reachable: true
+  - hostname: staging.bench.example
+    reachable: true
+candidates:
+  - id: staging-exposed
+    hostname: staging.bench.example
+    candidate_type: staging_dev_exposed
+    expected: present
+    desirable: true
+    validation: supported
+not_candidates:
+  - hostname: bench.example
+    candidate_type: staging_dev_exposed
+  - hostname: www.bench.example
+    candidate_type: staging_dev_exposed
+  - hostname: www.bench.example
+    candidate_type: exposed_admin_interface
+overlaps: []
+known_misses:
+  - id: missing-hsts-www
+    hostname: www.bench.example
+    class: security_header_observation
+    reason: Discovery does not currently persist security_headers_missing.
+    count_in_recall: false
+retest:
+  - candidate_id: staging-exposed
+    hostname: staging.bench.example
+    candidate_type: staging_dev_exposed
+    after: staging_down
+    expected_retest_status: passed

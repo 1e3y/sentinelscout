@@ -1,0 +1,242 @@
+schema_version: 1
+fixture_id: naming-traps
+scope:
+  root: bench.example
+  include_subdomains: true
+  exclusions: []
+sites:
+  - hostname: bench.example
+    path: /
+    html: bench.example/index.html
+  - hostname: www.bench.example
+    path: /
+    html: www-dashboard.bench.example/index.html
+  - hostname: devshop.bench.example
+    path: /
+    html: devshop.bench.example/index.html
+  - hostname: administrator-training.bench.example
+    path: /
+    html: administrator-training.bench.example/index.html
+  - hostname: auth.bench.example
+    path: /
+    html: auth.bench.example/index.html
+  - hostname: administer.bench.example
+    path: /
+    html: administer.bench.example/index.html
+  - hostname: auth-docs.bench.example
+    path: /
+    html: auth-docs.bench.example/index.html
+  - hostname: testimonial.bench.example
+    path: /
+    html: testimonial.bench.example/index.html
+  - hostname: grafana-training.bench.example
+    path: /
+    html: grafana-training.bench.example/index.html
+  - hostname: grafana-docs.bench.example
+    path: /
+    html: grafana-docs.bench.example/index.html
+  - hostname: jenkins-docs.bench.example
+    path: /
+    html: jenkins-docs.bench.example/index.html
+  - hostname: jenkins-training.bench.example
+    path: /
+    html: jenkins-training.bench.example/index.html
+  - hostname: grafana.bench.example
+    path: /
+    html: grafana.bench.example/index.html
+  - hostname: jenkins.bench.example
+    path: /
+    html: jenkins.bench.example/index.html
+  - hostname: admin.bench.example
+    path: /
+    html: admin.bench.example/index.html
+  - hostname: administrator.bench.example
+    path: /
+    html: administrator.bench.example/index.html
+  - hostname: admin-api.bench.example
+    path: /
+    html: admin-api.bench.example/index.html
+  - hostname: staging.bench.example
+    path: /
+    html: staging.bench.example/index.html
+  - hostname: staging-api.bench.example
+    path: /
+    html: staging-api.bench.example/index.html
+  - hostname: login.bench.example
+    path: /login
+    html: login.bench.example/index.html
+  - hostname: vpn.bench.example
+    path: /
+    html: vpn.bench.example/index.html
+assets:
+  - hostname: bench.example
+    reachable: true
+  - hostname: www.bench.example
+    reachable: true
+  - hostname: devshop.bench.example
+    reachable: true
+  - hostname: administrator-training.bench.example
+    reachable: true
+  - hostname: auth.bench.example
+    reachable: true
+  - hostname: administer.bench.example
+    reachable: true
+  - hostname: auth-docs.bench.example
+    reachable: true
+  - hostname: testimonial.bench.example
+    reachable: true
+  - hostname: grafana-training.bench.example
+    reachable: true
+  - hostname: grafana-docs.bench.example
+    reachable: true
+  - hostname: jenkins-docs.bench.example
+    reachable: true
+  - hostname: jenkins-training.bench.example
+    reachable: true
+  - hostname: grafana.bench.example
+    reachable: true
+  - hostname: jenkins.bench.example
+    reachable: true
+  - hostname: admin.bench.example
+    reachable: true
+  - hostname: administrator.bench.example
+    reachable: true
+  - hostname: admin-api.bench.example
+    reachable: true
+  - hostname: staging.bench.example
+    reachable: true
+  - hostname: staging-api.bench.example
+    reachable: true
+  - hostname: login.bench.example
+    reachable: true
+  - hostname: vpn.bench.example
+    reachable: true
+# Intended positives protect recall. Trap hosts that used to be expected-present
+# undesirable hits are now not_candidates (rule-quality, not TLD artifacts).
+candidates:
+  - id: grafana-product-label
+    hostname: grafana.bench.example
+    candidate_type: exposed_admin_interface
+    expected: present
+    desirable: true
+    validation: supported
+  - id: jenkins-admin
+    hostname: jenkins.bench.example
+    candidate_type: exposed_admin_interface
+    expected: present
+    desirable: true
+    validation: supported
+  - id: jenkins-sensitive
+    hostname: jenkins.bench.example
+    candidate_type: sensitive_service_exposed
+    expected: present
+    desirable: true
+    validation: supported
+  - id: admin-role
+    hostname: admin.bench.example
+    candidate_type: exposed_admin_interface
+    expected: present
+    desirable: true
+    validation: supported
+  - id: administrator-exact-label
+    hostname: administrator.bench.example
+    candidate_type: exposed_admin_interface
+    expected: present
+    desirable: true
+    validation: supported
+  - id: admin-api-role-token
+    hostname: admin-api.bench.example
+    candidate_type: exposed_admin_interface
+    expected: present
+    desirable: true
+    validation: supported
+  - id: staging-env
+    hostname: staging.bench.example
+    candidate_type: staging_dev_exposed
+    expected: present
+    desirable: true
+    validation: supported
+  - id: staging-api-env-token
+    hostname: staging-api.bench.example
+    candidate_type: staging_dev_exposed
+    expected: present
+    desirable: true
+    validation: supported
+  - id: login-auth
+    hostname: login.bench.example
+    candidate_type: auth_surface_observed
+    expected: present
+    desirable: true
+    validation: supported
+  - id: vpn-sensitive
+    hostname: vpn.bench.example
+    candidate_type: sensitive_service_exposed
+    expected: present
+    desirable: true
+    validation: supported
+not_candidates:
+  - hostname: bench.example
+    candidate_type: staging_dev_exposed
+  - hostname: www.bench.example
+    candidate_type: staging_dev_exposed
+  - hostname: www.bench.example
+    candidate_type: exposed_admin_interface
+  - hostname: www.bench.example
+    candidate_type: auth_surface_observed
+  - hostname: www.bench.example
+    candidate_type: sensitive_service_exposed
+  - hostname: devshop.bench.example
+    candidate_type: staging_dev_exposed
+  - hostname: devshop.bench.example
+    candidate_type: exposed_admin_interface
+  - hostname: administrator-training.bench.example
+    candidate_type: exposed_admin_interface
+  - hostname: administrator-training.bench.example
+    candidate_type: staging_dev_exposed
+  - hostname: administer.bench.example
+    candidate_type: exposed_admin_interface
+  - hostname: auth.bench.example
+    candidate_type: auth_surface_observed
+  - hostname: auth.bench.example
+    candidate_type: sensitive_service_exposed
+  - hostname: auth.bench.example
+    candidate_type: staging_dev_exposed
+  - hostname: auth-docs.bench.example
+    candidate_type: auth_surface_observed
+  - hostname: auth-docs.bench.example
+    candidate_type: sensitive_service_exposed
+  - hostname: testimonial.bench.example
+    candidate_type: staging_dev_exposed
+  - hostname: grafana-training.bench.example
+    candidate_type: exposed_admin_interface
+  - hostname: grafana-training.bench.example
+    candidate_type: sensitive_service_exposed
+  - hostname: grafana-docs.bench.example
+    candidate_type: exposed_admin_interface
+  - hostname: grafana-docs.bench.example
+    candidate_type: sensitive_service_exposed
+  - hostname: jenkins-docs.bench.example
+    candidate_type: exposed_admin_interface
+  - hostname: jenkins-docs.bench.example
+    candidate_type: sensitive_service_exposed
+  - hostname: jenkins-training.bench.example
+    candidate_type: exposed_admin_interface
+  - hostname: jenkins-training.bench.example
+    candidate_type: sensitive_service_exposed
+  - hostname: grafana.bench.example
+    candidate_type: sensitive_service_exposed
+  - hostname: grafana.bench.example
+    candidate_type: staging_dev_exposed
+overlaps:
+  - hostname: jenkins.bench.example
+    candidate_types:
+      - sensitive_service_exposed
+      - exposed_admin_interface
+    note: Expected overlap for v1 — both current deterministic rules match.
+known_misses:
+  - id: missing-hsts-www
+    hostname: www.bench.example
+    class: security_header_observation
+    reason: Discovery does not currently persist security_headers_missing.
+    count_in_recall: false
+retest: []

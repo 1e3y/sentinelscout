@@ -27,4 +27,8 @@ Requires `subfinder` and `httpx` on `PATH` for real discovery. Automated tests m
 ```bash
 uv run pytest
 PYTHONPATH=. uv run python scripts/e2e_discovery_operation.py
+uv run python -m app.benchmark run --all --mode offline --save
+uv run python -m app.benchmark compare --against ../../benchmark/results/baselines
 ```
+
+See [`benchmark/README.md`](../../benchmark/README.md). Fixture C (`retest-delta`) is explicit/local only.
