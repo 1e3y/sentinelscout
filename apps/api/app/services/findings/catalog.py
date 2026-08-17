@@ -35,8 +35,9 @@ BUSINESS_IMPACT_BY_CANDIDATE_TYPE: dict[str, str] = {
         "externally visible login attack surface."
     ),
     "security_header_observation": (
-        "Missing common HTTP security headers reduce browser-side protections "
-        "for clients interacting with the service."
+        "A captured HTTPS HTML response did not include Strict-Transport-Security, "
+        "which can reduce browser-side transport protections. This is a "
+        "configuration observation, not proof of an exploitable vulnerability."
     ),
 }
 
@@ -58,8 +59,9 @@ REMEDIATION_GUIDANCE_BY_CANDIDATE_TYPE: dict[str, str] = {
         "and MFA where appropriate, and avoid exposing unused login endpoints."
     ),
     "security_header_observation": (
-        "Apply relevant HTTP security headers (for example HSTS, CSP, "
-        "X-Content-Type-Options, X-Frame-Options) according to application needs."
+        "If the service is served over HTTPS, add Strict-Transport-Security with "
+        "an appropriate max-age. Treat this as a configuration improvement, not "
+        "as evidence of compromise."
     ),
 }
 

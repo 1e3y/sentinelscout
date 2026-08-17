@@ -2,7 +2,7 @@
 
 Authorized autonomous black-box security assessment platform.
 
-## Current scope (through Milestone 15)
+## Current scope (through Milestone 16)
 
 Staging host plan: **Vercel (web) + Railway (API, worker, scheduler, Postgres)**.
 Deploy config lives under `apps/api/Dockerfile`, `deploy/railway/`, `apps/web/vercel.json`, and [`docs/staging.md`](docs/staging.md).
@@ -39,6 +39,7 @@ The frontend is **not** a security boundary.
 - **Ops readiness:** `/health` liveness, `/ready` DB/config checks, structured logs, org/user rate limits
 - **Benchmark (M14):** loopback fixtures + explicit ground truth; offline CI pack `visible-surface` + `naming-traps`; report-only baseline diffs. Offline metrics are `pipeline_asset_precision` / `pipeline_asset_recall` (not discovery recall).
 - **Candidate matching (M15):** token-aware hostnames with marker categories (role/env vs named product vs short infra); stronger admin/auth/sensitive emission thresholds
+- **HTTP evidence (M16):** allowlisted response-header facts with explicit `headers_observed`; HSTS configuration observations only when capture is complete and the response was not redirected
 
 ## Prerequisites
 

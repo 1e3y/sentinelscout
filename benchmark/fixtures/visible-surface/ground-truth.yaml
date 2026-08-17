@@ -4,6 +4,8 @@ scope:
   root: bench.example
   include_subdomains: true
   exclusions: []
+default_response_headers:
+  Strict-Transport-Security: max-age=31536000
 sites:
   - hostname: bench.example
     path: /
@@ -11,6 +13,7 @@ sites:
   - hostname: www.bench.example
     path: /
     html: www.bench.example/index.html
+    skip_default_headers: true
   - hostname: staging.bench.example
     path: /
     html: staging.bench.example/index.html
@@ -70,6 +73,12 @@ candidates:
     expected: present
     desirable: true
     validation: supported
+  - id: www-missing-hsts
+    hostname: www.bench.example
+    candidate_type: security_header_observation
+    expected: present
+    desirable: true
+    validation: supported
 not_candidates:
   - hostname: bench.example
     candidate_type: staging_dev_exposed
@@ -87,16 +96,21 @@ not_candidates:
     candidate_type: staging_dev_exposed
   - hostname: jenkins.bench.example
     candidate_type: staging_dev_exposed
+  - hostname: bench.example
+    candidate_type: security_header_observation
+  - hostname: staging.bench.example
+    candidate_type: security_header_observation
+  - hostname: admin.bench.example
+    candidate_type: security_header_observation
+  - hostname: login.bench.example
+    candidate_type: security_header_observation
+  - hostname: jenkins.bench.example
+    candidate_type: security_header_observation
 overlaps:
   - hostname: jenkins.bench.example
     candidate_types:
       - sensitive_service_exposed
       - exposed_admin_interface
     note: Expected overlap for v1 — both current deterministic rules match.
-known_misses:
-  - id: missing-hsts-www
-    hostname: www.bench.example
-    class: security_header_observation
-    reason: Discovery does not currently persist security_headers_missing.
-    count_in_recall: false
+known_misses: []
 retest: []

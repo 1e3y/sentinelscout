@@ -9,21 +9,13 @@
     "recall": 1.0,
     "unexpected": []
   },
-  "duration_ms": 347,
+  "duration_ms": 983,
   "fixture_id": "retest-delta",
-  "git_sha": "2adf190c6efffcfe4c07e656665f3c31532e5dc8",
-  "known_misses": [
-    {
-      "class": "security_header_observation",
-      "count_in_recall": false,
-      "hostname": "www.bench.example",
-      "id": "missing-hsts-www",
-      "reason": "Discovery does not currently persist security_headers_missing."
-    }
-  ],
+  "git_sha": "f3f0074c3e908a9b1686b3ee6d0179398fc98ae8",
+  "known_misses": [],
   "live_discovery": null,
   "mode": "offline",
-  "operation_id": "e8f0a29b-19a1-4f50-9a32-53ed6d1dd347",
+  "operation_id": "4ef36c56-79b2-4854-9173-39715a8427e9",
   "overlaps": [],
   "pipeline_assets": {
     "expected": 3,

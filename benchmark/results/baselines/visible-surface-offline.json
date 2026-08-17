@@ -1,7 +1,7 @@
 {
   "candidates": {
-    "emitted": 5,
-    "expected_present": 5,
+    "emitted": 6,
+    "expected_present": 6,
     "false_positives_vs_not_candidates": [],
     "misses": [],
     "precision_desirable": 1.0,
@@ -9,21 +9,13 @@
     "recall": 1.0,
     "unexpected": []
   },
-  "duration_ms": 593,
+  "duration_ms": 1028,
   "fixture_id": "visible-surface",
-  "git_sha": "2adf190c6efffcfe4c07e656665f3c31532e5dc8",
-  "known_misses": [
-    {
-      "class": "security_header_observation",
-      "count_in_recall": false,
-      "hostname": "www.bench.example",
-      "id": "missing-hsts-www",
-      "reason": "Discovery does not currently persist security_headers_missing."
-    }
-  ],
+  "git_sha": "f3f0074c3e908a9b1686b3ee6d0179398fc98ae8",
+  "known_misses": [],
   "live_discovery": null,
   "mode": "offline",
-  "operation_id": "a0372c0f-6502-486f-abdb-51633b37136b",
+  "operation_id": "a8ce666c-2b35-4fc4-8c4d-3f22bba1ef11",
   "overlaps": [
     {
       "complete": true,
@@ -51,9 +43,9 @@
   "schema_version": 1,
   "validation": {
     "disagreements": [],
-    "expected_supported": 5,
+    "expected_supported": 6,
     "support_rate": 1.0,
-    "supported": 5
+    "supported": 6
   },
   "warnings": []
 }

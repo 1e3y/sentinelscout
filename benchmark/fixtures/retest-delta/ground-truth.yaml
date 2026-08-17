@@ -4,6 +4,8 @@ scope:
   root: bench.example
   include_subdomains: true
   exclusions: []
+default_response_headers:
+  Strict-Transport-Security: max-age=31536000
 sites:
   - hostname: bench.example
     path: /
@@ -36,12 +38,7 @@ not_candidates:
   - hostname: www.bench.example
     candidate_type: exposed_admin_interface
 overlaps: []
-known_misses:
-  - id: missing-hsts-www
-    hostname: www.bench.example
-    class: security_header_observation
-    reason: Discovery does not currently persist security_headers_missing.
-    count_in_recall: false
+known_misses: []
 retest:
   - candidate_id: staging-exposed
     hostname: staging.bench.example

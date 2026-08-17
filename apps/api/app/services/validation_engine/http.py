@@ -9,7 +9,8 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from app.services.validation_engine.types import SAFE_HEADER_NAMES, SAFE_HTTP_METHODS, SafeHttpObservation
+from app.services.http_evidence import sanitize_http_evidence
+from app.services.validation_engine.types import SAFE_HTTP_METHODS, SafeHttpObservation
 
 _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 _MAX_BODY_BYTES = 16_384
@@ -50,6 +51,7 @@ class FakeSafeHttpClient:
             title="",
             headers={},
             reachable=False,
+            headers_observed=False,
         )
 
 
@@ -80,28 +82,40 @@ class HttpxSafeHttpClient:
                 title="",
                 headers={},
                 reachable=False,
+                headers_observed=False,
             )
 
         title = ""
-        content_type = (response.headers.get("content-type") or "").lower()
-        if method_upper == "GET" and "text/html" in content_type:
+        raw_content_type = (response.headers.get("content-type") or "").lower()
+        if method_upper == "GET" and "text/html" in raw_content_type:
             chunk = response.content[:_MAX_BODY_BYTES]
             match = _TITLE_RE.search(chunk.decode("utf-8", errors="ignore"))
             if match:
                 title = re.sub(r"\s+", " ", match.group(1)).strip()[:512]
 
-        headers = {
-            name.lower(): value[:256]
-            for name, value in response.headers.items()
-            if name.lower() in SAFE_HEADER_NAMES
-        }
-        # Never retain Set-Cookie / Authorization / etc.
+        requested = target
+        final = str(response.url)
+        evidence = sanitize_http_evidence(
+            headers_observed=True,
+            raw_headers=dict(response.headers),
+            requested_url=requested,
+            final_url=final,
+            redirected=bool(response.history),
+            content_type=raw_content_type or None,
+        )
         status = response.status_code
         reachable = status is not None and 100 <= status < 500
         return SafeHttpObservation(
-            url=str(response.url),
+            url=evidence.final_url or final,
             status_code=status,
             title=title,
-            headers=headers,
+            headers=dict(evidence.headers),
             reachable=reachable,
+            headers_observed=True,
+            headers_present=evidence.headers_present,
+            content_type=evidence.content_type,
+            requested_url=evidence.requested_url,
+            final_url=evidence.final_url,
+            redirected=evidence.redirected,
+            location_url=evidence.location_url,
         )

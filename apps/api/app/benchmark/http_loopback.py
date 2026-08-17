@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 from typing import Any, ClassVar
 from urllib.parse import urlsplit
 
@@ -13,14 +12,22 @@ import httpx
 
 from app.benchmark.ground_truth import GroundTruth, SiteSpec
 from app.benchmark.paths import html_root
-from app.services.validation_engine.types import (
-    SAFE_HEADER_NAMES,
-    SAFE_HTTP_METHODS,
-    SafeHttpObservation,
-)
+from app.services.http_evidence import sanitize_http_evidence, sanitize_url
+from app.services.validation_engine.types import SAFE_HTTP_METHODS, SafeHttpObservation
 
 _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 _MAX_BODY_BYTES = 16_384
+
+
+def _unreachable(url: str) -> SafeHttpObservation:
+    return SafeHttpObservation(
+        url=url,
+        status_code=None,
+        title="",
+        headers={},
+        reachable=False,
+        headers_observed=False,
+    )
 
 
 class LoopbackSafeHttpClient:
@@ -48,13 +55,12 @@ class LoopbackSafeHttpClient:
         host = (urlsplit(target).hostname or "").lower().rstrip(".")
         path = urlsplit(target).path or "/"
         if host in self.down_hosts:
-            return SafeHttpObservation(
-                url=target,
-                status_code=None,
-                title="",
-                headers={},
-                reachable=False,
-            )
+            return _unreachable(target)
+
+        def _retain_fixture_host(request: httpx.Request) -> None:
+            request.headers["host"] = host
+            request.headers["x-scout-fixture-host"] = host
+
         loopback = f"http://127.0.0.1:{self.port}{path}"
         try:
             with httpx.Client(
@@ -62,6 +68,7 @@ class LoopbackSafeHttpClient:
                 follow_redirects=True,
                 max_redirects=3,
                 trust_env=False,
+                event_hooks={"request": [_retain_fixture_host]},
             ) as client:
                 response = client.request(
                     method_upper,
@@ -69,55 +76,60 @@ class LoopbackSafeHttpClient:
                     headers={
                         "Host": host,
                         "Accept": "text/html",
-                        # Harness-only: httpx may rewrite Host to 127.0.0.1.
                         "X-Scout-Fixture-Host": host,
                     },
                 )
         except httpx.HTTPError:
-            return SafeHttpObservation(
-                url=target,
-                status_code=None,
-                title="",
-                headers={},
-                reachable=False,
-            )
+            return _unreachable(target)
 
         title = ""
-        content_type = (response.headers.get("content-type") or "").lower()
-        if method_upper == "GET" and "text/html" in content_type:
+        raw_content_type = (response.headers.get("content-type") or "").lower()
+        if method_upper == "GET" and "text/html" in raw_content_type:
             chunk = response.content[:_MAX_BODY_BYTES]
             match = _TITLE_RE.search(chunk.decode("utf-8", errors="ignore"))
             if match:
                 title = re.sub(r"\s+", " ", match.group(1)).strip()[:512]
-        headers = {
-            name.lower(): value[:256]
-            for name, value in response.headers.items()
-            if name.lower() in SAFE_HEADER_NAMES
-        }
+
+        final_path = urlsplit(str(response.url)).path or "/"
+        final_url = sanitize_url(f"https://{host}{final_path}") or target
+        evidence = sanitize_http_evidence(
+            headers_observed=True,
+            raw_headers=dict(response.headers),
+            requested_url=target,
+            final_url=final_url,
+            redirected=bool(response.history),
+            content_type=raw_content_type or None,
+        )
         status = response.status_code
         reachable = status is not None and 100 <= status < 500
         return SafeHttpObservation(
-            url=target,
+            url=evidence.final_url or final_url,
             status_code=status,
             title=title,
-            headers=headers,
+            headers=dict(evidence.headers),
             reachable=reachable,
+            headers_observed=True,
+            headers_present=evidence.headers_present,
+            content_type=evidence.content_type,
+            requested_url=evidence.requested_url,
+            final_url=evidence.final_url,
+            redirected=evidence.redirected,
+            location_url=evidence.location_url,
         )
 
 
-def _index_sites(sites: tuple[SiteSpec, ...]) -> dict[tuple[str, str], Path]:
-    mapping: dict[tuple[str, str], Path] = {}
-    root = html_root()
+def _index_sites(sites: tuple[SiteSpec, ...]) -> dict[tuple[str, str], SiteSpec]:
+    mapping: dict[tuple[str, str], SiteSpec] = {}
     for site in sites:
         path = site.path if site.path.startswith("/") else f"/{site.path}"
-        mapping[(site.hostname, path)] = root / site.html
-        if path != "/":
-            mapping.setdefault((site.hostname, "/"), root / site.html)
+        mapping[(site.hostname, path)] = site
+        if path != "/" and site.redirect_to is None:
+            mapping.setdefault((site.hostname, "/"), site)
     return mapping
 
 
 class FixtureRequestHandler(BaseHTTPRequestHandler):
-    site_index: ClassVar[dict[tuple[str, str], Path]] = {}
+    site_index: ClassVar[dict[tuple[str, str], SiteSpec]] = {}
     down_hosts: ClassVar[set[str]] = set()
 
     def log_message(self, _format: str, *_args: Any) -> None:
@@ -139,8 +151,23 @@ class FixtureRequestHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
             return
-        file_path = self.site_index.get((host, path)) or self.site_index.get((host, "/"))
-        if file_path is None or not file_path.is_file():
+        site = self.site_index.get((host, path)) or self.site_index.get((host, "/"))
+        if site is None:
+            self.send_response(404)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            if include_body:
+                self.wfile.write(b"not found")
+            return
+        if site.redirect_to:
+            self.send_response(302)
+            self.send_header("Location", site.redirect_to)
+            for name, value in site.response_headers:
+                self.send_header(name, value)
+            self.end_headers()
+            return
+        file_path = html_root() / site.html
+        if not file_path.is_file():
             self.send_response(404)
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
@@ -149,8 +176,12 @@ class FixtureRequestHandler(BaseHTTPRequestHandler):
             return
         body = file_path.read_bytes()
         self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Type", site.content_type)
         self.send_header("Content-Length", str(len(body)))
+        for name, value in site.response_headers:
+            if name.lower() == "content-type":
+                continue
+            self.send_header(name, value)
         self.end_headers()
         if include_body:
             self.wfile.write(body)

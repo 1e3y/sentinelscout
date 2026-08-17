@@ -16,6 +16,10 @@ class SiteSpec:
     hostname: str
     path: str
     html: str
+    content_type: str = "text/html; charset=utf-8"
+    response_headers: tuple[tuple[str, str], ...] = ()
+    redirect_to: str | None = None
+    capture_headers: bool = True
 
 
 @dataclass(frozen=True)
@@ -66,20 +70,39 @@ def ground_truth_path(fixture_id: str) -> Path:
     return fixtures_root() / fixture_id / "ground-truth.yaml"
 
 
+def _header_map(raw: Any) -> dict[str, str]:
+    if not isinstance(raw, dict):
+        return {}
+    return {str(key): str(value) for key, value in raw.items()}
+
+
+def _parse_site(row: dict[str, Any], *, default_headers: dict[str, str]) -> SiteSpec:
+    replace = bool(row.get("replace_headers") or row.get("skip_default_headers"))
+    site_headers = _header_map(row.get("response_headers") or {})
+    headers = dict(site_headers) if replace else {**default_headers, **site_headers}
+    redirect = row.get("redirect_to")
+    return SiteSpec(
+        hostname=str(row["hostname"]).lower().rstrip("."),
+        path=str(row.get("path") or "/"),
+        html=str(row["html"]),
+        content_type=str(row.get("content_type") or "text/html; charset=utf-8"),
+        response_headers=tuple(headers.items()),
+        redirect_to=str(redirect) if redirect else None,
+        capture_headers=bool(row.get("capture_headers", True)),
+    )
+
+
 def load_ground_truth(fixture_id: str) -> GroundTruth:
     path = ground_truth_path(fixture_id)
     if not path.is_file():
         raise FileNotFoundError(f"Missing ground truth: {path}")
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
-        raise ValueError(f"Ground truth must be a mapping: {path}")
+        raise TypeError(f"Ground truth must be a mapping: {path}")
     scope = raw.get("scope") or {}
+    default_headers = _header_map(raw.get("default_response_headers") or {})
     sites = tuple(
-        SiteSpec(
-            hostname=str(row["hostname"]).lower().rstrip("."),
-            path=str(row.get("path") or "/"),
-            html=str(row["html"]),
-        )
+        _parse_site(row, default_headers=default_headers)
         for row in raw.get("sites") or []
     )
     assets = tuple(

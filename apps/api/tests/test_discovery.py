@@ -146,6 +146,81 @@ def test_verified_target_discovery_persists_assets_and_observations(
     assert db_session.scalar(select(func.count()).select_from(DiscoveryObservation)) >= 1
 
 
+def test_http_observation_persists_capture_state_and_strips_secrets(
+    client, make_token, seed_user_a, dns_resolver, engine
+):
+    user_id, org_id = seed_user_a
+    token = make_token(sub=user_id, org_id=org_id)
+    domain = "headers.example"
+    target_id = _create_verified_target(client, token, domain, dns_resolver)
+    _enable_subdomains(client, token, target_id)
+    operation_id = _queue_operation(client, token, target_id)
+    tools = FakeDiscoveryTools(
+        hosts_by_domain={domain: [f"www.{domain}", f"skip.{domain}"]},
+        probes_by_host={
+            f"www.{domain}": ProbeResult(
+                url=f"https://www.{domain}/",
+                status_code=200,
+                title="Welcome",
+                headers_observed=True,
+                headers={
+                    "content-type": "text/html",
+                    "set-cookie": "session=abc",
+                    "authorization": "Bearer secret-token",
+                    "server": "nginx",
+                    "x-powered-by": "php",
+                },
+                content_type="text/html",
+                requested_url=f"https://www.{domain}/",
+                final_url=f"https://www.{domain}/",
+                redirected=False,
+                scheme="https",
+            ),
+            f"skip.{domain}": ProbeResult(
+                url=f"https://skip.{domain}/",
+                status_code=200,
+                title="Welcome",
+                headers_observed=False,
+                headers={},
+                content_type="text/html",
+                requested_url=f"https://skip.{domain}/",
+                final_url=f"https://skip.{domain}/",
+                redirected=False,
+                scheme="https",
+            ),
+        },
+    )
+    factory = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    assert process_one_operation(factory, tools=tools).status == "completed"
+    observations = client.get(
+        f"/v1/operations/{operation_id}/observations", headers=_auth(token)
+    ).json()
+    http_rows = [
+        row
+        for row in observations
+        if row["observation_type"] == "http_response_observed"
+    ]
+    by_host = {row["metadata"]["hostname"]: row["metadata"] for row in http_rows}
+    www_meta = by_host[f"www.{domain}"]
+    skip_meta = by_host[f"skip.{domain}"]
+    blob = str(www_meta).lower()
+    assert www_meta["headers_observed"] is True
+    assert skip_meta["headers_observed"] is False
+    assert "set-cookie" not in blob
+    assert "secret-token" not in blob
+    assert "authorization" not in (www_meta.get("headers") or {})
+    assert "server" not in (www_meta.get("headers") or {})
+    assert "x-powered-by" not in (www_meta.get("headers") or {})
+    candidates = client.get(
+        f"/v1/operations/{operation_id}/candidates", headers=_auth(token)
+    ).json()
+    pairs = {(c["asset_hostname"], c["candidate_type"]) for c in candidates}
+    assert (f"www.{domain}", "security_header_observation") in pairs
+    assert (f"skip.{domain}", "security_header_observation") not in pairs
+    header = next(c for c in candidates if c["candidate_type"] == "security_header_observation")
+    assert header["evidence"].get("observation_ids")
+
+
 def test_exclusions_enforced_before_probing(
     client, make_token, seed_user_a, dns_resolver, engine
 ):

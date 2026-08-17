@@ -42,8 +42,10 @@ into one accuracy score:
 Jenkins `sensitive_service_exposed` + `exposed_admin_interface` is **expected
 overlap**, not a false positive.
 
-Header observations stay in `known_misses` until discovery persists
-`security_headers_missing`. They are excluded from recall on purpose.
+Header observations require captured response-header facts (`headers_observed`).
+Missing HSTS on a non-redirected HTTPS HTML document is a configuration
+candidate. Unavailable header capture and redirected final-only evidence do not
+emit `security_header_observation`.
 
 Candidate emission uses **marker categories**. Role/environment tokens (`admin`,
 `staging`, `dev`) may match an exact DNS label or a hyphen/underscore token.
@@ -62,8 +64,9 @@ treat the DNS label `test` as a staging marker.
 
 | Id | Default CI | Purpose |
 | --- | --- | --- |
-| `visible-surface` | yes | Obvious reachable admin / staging / auth / Jenkins surfaces |
+| `visible-surface` | yes | Obvious reachable admin / staging / auth / Jenkins surfaces; `www` missing HSTS is a scored header observation |
 | `naming-traps` | yes | Marker-category traps and recall anchors (`devshop`, `administrator-training`, dashboard title, `grafana-training` / `jenkins-docs`, plus exact-label `grafana` / `jenkins`) |
+| `header-surface` | yes | HSTS present / missing / JSON / capture-unavailable / redirect-final-only |
 | `retest-delta` | **no** | Fixture C: take staging down, expect a passing retest. Run explicitly until the harness is trusted |
 
 ## Commands
@@ -71,12 +74,13 @@ treat the DNS label `test` as a staging marker.
 From `apps/api` (Postgres required; uses `DATABASE_URL`):
 
 ```bash
-# Default CI pack (A + B), offline
+# Default CI pack (A + B + header-surface), offline
 uv run python -m app.benchmark run --all --mode offline --save
 
 # Single fixture
 uv run python -m app.benchmark run --fixture visible-surface --mode offline --save
 uv run python -m app.benchmark run --fixture naming-traps --mode offline --save
+uv run python -m app.benchmark run --fixture header-surface --mode offline --save
 
 # Fixture C — explicit only, not the default CI pack
 uv run python -m app.benchmark run --fixture retest-delta --mode offline --save
@@ -88,7 +92,7 @@ uv run python -m app.benchmark compare --against ../../benchmark/results/baselin
 uv run python -m app.benchmark serve --fixture visible-surface --port 18080
 ```
 
-`--all` is **only** `visible-surface` and `naming-traps`.
+`--all` is **only** `visible-surface`, `naming-traps`, and `header-surface`.
 
 CI fails if the benchmark crashes, fixtures fail to start, schema/result
 generation fails, or tests fail. CI does **not** fail because candidate/asset

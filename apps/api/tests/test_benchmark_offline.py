@@ -28,12 +28,12 @@ def _ban_live_discovery_tools(monkeypatch) -> None:
 
 
 def test_default_ci_pack_excludes_retest_delta():
-    assert DEFAULT_CI_FIXTURES == ("visible-surface", "naming-traps")
+    assert DEFAULT_CI_FIXTURES == ("visible-surface", "naming-traps", "header-surface")
     assert "retest-delta" not in DEFAULT_CI_FIXTURES
 
 
 def test_ground_truth_uses_bench_example_namespace():
-    for fixture_id in ("visible-surface", "naming-traps", "retest-delta"):
+    for fixture_id in ("visible-surface", "naming-traps", "retest-delta", "header-surface"):
         truth = load_ground_truth(fixture_id)
         assert truth.root == "bench.example"
         assert all(
@@ -82,7 +82,7 @@ def test_offline_ci_pack_schema_and_report_only_baseline(db_session, monkeypatch
     assert "REPORT-ONLY" in captured.out
     assert pack["fails_ci"] is False
     assert pack["policy"] == "report_only"
-    assert len(results) == 2
+    assert len(results) == 3
 
 
 def test_offline_mode_does_not_call_subprocess_discovery(db_session, monkeypatch):

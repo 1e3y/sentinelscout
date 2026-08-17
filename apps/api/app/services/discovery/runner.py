@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import json
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from app.core.config import get_settings
+from app.services.http_evidence import (
+    http_json_headers_observed,
+    media_type,
+    sanitize_http_evidence,
+)
 
 
 class DiscoveryError(Exception):
@@ -19,6 +24,15 @@ class ProbeResult:
     url: str
     status_code: int | None
     title: str
+    headers_observed: bool = False
+    headers: dict[str, str] = field(default_factory=dict)
+    headers_present: tuple[str, ...] = ()
+    content_type: str | None = None
+    requested_url: str | None = None
+    final_url: str | None = None
+    redirected: bool = False
+    location_url: str | None = None
+    scheme: str | None = None
 
 
 class DiscoveryTools(Protocol):
@@ -76,6 +90,8 @@ class SubprocessDiscoveryTools:
                     "-title",
                     "-status-code",
                     "-follow-redirects",
+                    "-content-type",
+                    "-include-response-header",
                 ],
                 input="\n".join(hosts),
                 capture_output=True,
@@ -107,7 +123,33 @@ class SubprocessDiscoveryTools:
             status = entry.get("status_code")
             status_code = int(status) if isinstance(status, int) else None
             title = str(entry.get("title") or "")[:512]
-            results.append(ProbeResult(url=url, status_code=status_code, title=title))
+            requested = str(entry.get("input") or entry.get("host") or url).strip()
+            headers_observed, raw_headers = http_json_headers_observed(entry)
+            top_content_type = media_type(str(entry.get("content_type") or "") or None)
+            evidence = sanitize_http_evidence(
+                headers_observed=headers_observed,
+                raw_headers=raw_headers,
+                requested_url=requested,
+                final_url=url,
+                redirected=bool(entry.get("chain") or entry.get("redirects")),
+                content_type=top_content_type,
+            )
+            results.append(
+                ProbeResult(
+                    url=url,
+                    status_code=status_code,
+                    title=title,
+                    headers_observed=evidence.headers_observed,
+                    headers=dict(evidence.headers),
+                    headers_present=evidence.headers_present,
+                    content_type=evidence.content_type or top_content_type,
+                    requested_url=evidence.requested_url,
+                    final_url=evidence.final_url,
+                    redirected=evidence.redirected,
+                    location_url=evidence.location_url,
+                    scheme=evidence.scheme,
+                )
+            )
         return results
 
 

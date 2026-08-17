@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 from app.models.asset import Asset, DiscoveryObservation
 from app.services.candidate_engine.matching import (
@@ -13,6 +14,12 @@ from app.services.candidate_engine.matching import (
     title_contains,
 )
 from app.services.candidate_engine.types import CandidateDraft
+from app.services.http_evidence import (
+    HEADER_PRESENCE_ONLY,
+    HSTS_HEADER,
+    hsts_header_present,
+    is_https_html_success,
+)
 
 # Kept for validation_engine imports — emission uses the categorized tuples below.
 ADMIN_HOST_MARKERS = (
@@ -357,26 +364,70 @@ def rule_auth_surface_observed(ctx: AssetContext) -> CandidateDraft | None:
 
 
 def rule_security_header_observation(ctx: AssetContext) -> CandidateDraft | None:
-    """Reserved for future header-based facts. Inactive until observations include headers."""
-    for obs in ctx.observations:
-        meta = obs.observation_metadata or {}
-        headers = meta.get("security_headers_missing")
-        if isinstance(headers, list) and headers:
-            return CandidateDraft(
-                asset_id=ctx.asset.id,
-                candidate_type="security_header_observation",
-                title="Security-relevant HTTP configuration observation",
-                summary=(
-                    "HTTP response metadata indicated missing common security headers. "
-                    "Candidate — not validated."
-                ),
-                observation_ids=(str(obs.id),),
-                reasons=(
-                    "Observable HTTP response metadata reported missing security headers.",
-                ),
-                signals=tuple(str(item) for item in headers[:10]),
-            )
-    return None
+    """HSTS configuration observation. Requires captured headers and no redirect."""
+    if not _has_reachable(ctx):
+        return None
+    http_obs = [
+        obs
+        for obs in ctx.observations
+        if obs.observation_type == "http_response_observed"
+    ]
+    if not http_obs:
+        return None
+    obs = http_obs[-1]
+    meta = obs.observation_metadata or {}
+    if meta.get("headers_observed") is not True:
+        return None
+    if bool(meta.get("redirected")):
+        return None
+
+    scheme = str(meta.get("scheme") or "").lower() or None
+    if not scheme:
+        scheme = (urlsplit(ctx.url or meta.get("url") or "").scheme or "").lower() or None
+    content_type = meta.get("content_type")
+    status_code = meta.get("status_code")
+    try:
+        status_int = int(status_code) if status_code is not None else None
+    except (TypeError, ValueError):
+        status_int = None
+    if not is_https_html_success(
+        scheme=scheme, content_type=content_type if isinstance(content_type, str) else None,
+        status_code=status_int,
+    ):
+        return None
+
+    headers = meta.get("headers") if isinstance(meta.get("headers"), dict) else {}
+    present = meta.get("headers_present") if isinstance(meta.get("headers_present"), list) else []
+    if hsts_header_present(headers, [str(item) for item in present]):
+        return None
+
+    supporting: list[str] = []
+    for name in HEADER_PRESENCE_ONLY:
+        if name not in {str(item).lower() for item in present} and name not in headers:
+            supporting.append(f"supporting: {name} not present (not sufficient alone)")
+
+    signals = (
+        f"strong: {HSTS_HEADER} not present on captured HTTPS HTML response",
+        HSTS_HEADER,
+        *supporting[:6],
+    )
+    return CandidateDraft(
+        asset_id=ctx.asset.id,
+        candidate_type="security_header_observation",
+        title="Security-relevant HTTP configuration observation",
+        summary=(
+            "A publicly reachable HTTPS HTML document did not include "
+            "Strict-Transport-Security in captured response headers. "
+            "This is a configuration observation — not a confirmed vulnerability. "
+            "Candidate — not validated."
+        ),
+        observation_ids=(str(obs.id),),
+        reasons=(
+            "Asset responded publicly over HTTP(S).",
+            "Response headers were captured and Strict-Transport-Security was absent.",
+        ),
+        signals=signals,
+    )
 
 
 RuleFn = Callable[[AssetContext], CandidateDraft | None]

@@ -1,0 +1,79 @@
+schema_version: 1
+fixture_id: header-surface
+scope:
+  root: bench.example
+  include_subdomains: true
+  exclusions: []
+sites:
+  - hostname: bench.example
+    path: /
+    html: bench.example/index.html
+    response_headers:
+      Strict-Transport-Security: max-age=31536000
+  - hostname: headers-ok.bench.example
+    path: /
+    html: headers-ok.bench.example/index.html
+    response_headers:
+      Strict-Transport-Security: max-age=31536000
+  - hostname: headers-missing.bench.example
+    path: /
+    html: headers-missing.bench.example/index.html
+  - hostname: api-json.bench.example
+    path: /
+    html: api-json.bench.example/index.html
+    content_type: application/json
+  - hostname: static-txt.bench.example
+    path: /
+    html: static-txt.bench.example/index.html
+    content_type: text/plain; charset=utf-8
+  - hostname: headers-unavailable.bench.example
+    path: /
+    html: headers-missing.bench.example/index.html
+    capture_headers: false
+  - hostname: headers-redirect.bench.example
+    path: /
+    html: headers-redirect.bench.example/index.html
+    redirect_to: /home
+  - hostname: headers-redirect.bench.example
+    path: /home
+    html: headers-redirect.bench.example/index.html
+assets:
+  - hostname: bench.example
+    reachable: true
+  - hostname: headers-ok.bench.example
+    reachable: true
+  - hostname: headers-missing.bench.example
+    reachable: true
+  - hostname: api-json.bench.example
+    reachable: true
+  - hostname: static-txt.bench.example
+    reachable: true
+  - hostname: headers-unavailable.bench.example
+    reachable: true
+  - hostname: headers-redirect.bench.example
+    reachable: true
+candidates:
+  - id: headers-missing-hsts
+    hostname: headers-missing.bench.example
+    candidate_type: security_header_observation
+    expected: present
+    desirable: true
+    validation: supported
+not_candidates:
+  - hostname: bench.example
+    candidate_type: security_header_observation
+  - hostname: bench.example
+    candidate_type: staging_dev_exposed
+  - hostname: headers-ok.bench.example
+    candidate_type: security_header_observation
+  - hostname: api-json.bench.example
+    candidate_type: security_header_observation
+  - hostname: static-txt.bench.example
+    candidate_type: security_header_observation
+  - hostname: headers-unavailable.bench.example
+    candidate_type: security_header_observation
+  - hostname: headers-redirect.bench.example
+    candidate_type: security_header_observation
+overlaps: []
+known_misses: []
+retest: []

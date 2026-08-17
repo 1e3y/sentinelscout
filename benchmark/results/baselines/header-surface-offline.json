@@ -1,7 +1,7 @@
 {
   "candidates": {
-    "emitted": 10,
-    "expected_present": 10,
+    "emitted": 1,
+    "expected_present": 1,
     "false_positives_vs_not_candidates": [],
     "misses": [],
     "precision_desirable": 1.0,
@@ -9,31 +9,18 @@
     "recall": 1.0,
     "unexpected": []
   },
-  "duration_ms": 2175,
-  "fixture_id": "naming-traps",
+  "duration_ms": 1326,
+  "fixture_id": "header-surface",
   "git_sha": "f3f0074c3e908a9b1686b3ee6d0179398fc98ae8",
   "known_misses": [],
   "live_discovery": null,
   "mode": "offline",
-  "operation_id": "e955b8f8-55c5-487d-91b4-7f493d919adb",
-  "overlaps": [
-    {
-      "complete": true,
-      "emitted_types": [
-        "sensitive_service_exposed",
-        "exposed_admin_interface"
-      ],
-      "expected_types": [
-        "sensitive_service_exposed",
-        "exposed_admin_interface"
-      ],
-      "hostname": "jenkins.bench.example"
-    }
-  ],
+  "operation_id": "f4871a16-4dc7-4354-8383-b0b60311ba82",
+  "overlaps": [],
   "pipeline_assets": {
-    "expected": 21,
+    "expected": 7,
     "extra": [],
-    "found": 21,
+    "found": 7,
     "missing": [],
     "note": "Offline/local seeded-host pipeline: whether Scout scoped, probed, persisted, and processed hosts it was handed. Not internet discovery recall.",
     "pipeline_asset_precision": 1.0,
@@ -43,9 +30,9 @@
   "schema_version": 1,
   "validation": {
     "disagreements": [],
-    "expected_supported": 10,
+    "expected_supported": 1,
     "support_rate": 1.0,
-    "supported": 10
+    "supported": 1
   },
   "warnings": []
 }

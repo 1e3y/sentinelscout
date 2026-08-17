@@ -2,7 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
-from uuid import UUID
+
+from app.services.http_evidence import SAFE_HEADER_NAMES
+
+__all__ = [
+    "ALLOWLISTED_VALIDATION_METHODS",
+    "CANDIDATE_TYPE_METHODS",
+    "SAFE_HEADER_NAMES",
+    "SAFE_HTTP_METHODS",
+    "SafeHttpObservation",
+    "ValidationResult",
+    "method_for_candidate_type",
+]
 
 
 @dataclass(frozen=True)
@@ -22,6 +33,13 @@ class SafeHttpObservation:
     title: str
     headers: dict[str, str]
     reachable: bool
+    headers_observed: bool = False
+    headers_present: tuple[str, ...] = ()
+    content_type: str | None = None
+    requested_url: str | None = None
+    final_url: str | None = None
+    redirected: bool = False
+    location_url: str | None = None
 
 
 # Explicit allowlist — unknown types must not probe.
@@ -38,24 +56,6 @@ ALLOWLISTED_VALIDATION_METHODS = frozenset(CANDIDATE_TYPE_METHODS.values()) | {
 }
 
 SAFE_HTTP_METHODS = frozenset({"GET", "HEAD"})
-
-# Headers safe to retain as evidence (names only / values of public security headers).
-SAFE_HEADER_NAMES = frozenset(
-    {
-        "server",
-        "x-powered-by",
-        "content-type",
-        "strict-transport-security",
-        "content-security-policy",
-        "x-frame-options",
-        "x-content-type-options",
-        "referrer-policy",
-        "permissions-policy",
-        "cross-origin-opener-policy",
-        "cross-origin-resource-policy",
-        "location",
-    }
-)
 
 
 def method_for_candidate_type(candidate_type: str) -> str | None:

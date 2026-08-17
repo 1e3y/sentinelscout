@@ -29,5 +29,5 @@ def baselines_root() -> Path:
     return results_root() / "baselines"
 
 
-DEFAULT_CI_FIXTURES = ("visible-surface", "naming-traps")
-ALL_FIXTURES = ("visible-surface", "naming-traps", "retest-delta")
+DEFAULT_CI_FIXTURES = ("visible-surface", "naming-traps", "header-surface")
+ALL_FIXTURES = ("visible-surface", "naming-traps", "retest-delta", "header-surface")

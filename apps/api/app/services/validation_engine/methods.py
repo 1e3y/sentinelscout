@@ -17,6 +17,7 @@ from app.services.candidate_engine.rules import (
     SENSITIVE_HOST_MARKERS,
     STAGING_HOST_MARKERS,
 )
+from app.services.http_evidence import HSTS_HEADER, hsts_header_present
 from app.services.validation_engine.http import SafeHttpClient
 from app.services.validation_engine.types import (
     ALLOWLISTED_VALIDATION_METHODS,
@@ -307,23 +308,46 @@ def validate_security_headers(
     observations: list[DiscoveryObservation],
 ) -> ValidationResult:
     method = "header_confirmation"
+    stored_observed = False
+    stored_redirected = False
+    for obs_row in observations:
+        meta = obs_row.observation_metadata or {}
+        if obs_row.observation_type != "http_response_observed":
+            continue
+        if meta.get("headers_observed") is True:
+            stored_observed = True
+        if bool(meta.get("redirected")):
+            stored_redirected = True
+
     expected_missing: list[str] = []
     for obs_row in observations:
         meta = obs_row.observation_metadata or {}
         headers = meta.get("security_headers_missing")
         if isinstance(headers, list):
             expected_missing.extend(str(h).lower() for h in headers)
-    # Also accept candidate evidence signals.
     signals = (candidate.evidence or {}).get("signals") or []
     if isinstance(signals, list):
         for item in signals:
             if isinstance(item, str) and item.lower() in COMMON_SECURITY_HEADERS:
                 expected_missing.append(item.lower())
+    if candidate.candidate_type == "security_header_observation":
+        expected_missing.append(HSTS_HEADER)
     expected_missing = list(dict.fromkeys(expected_missing))
 
     obs = client.fetch(_target_url(asset), method="GET")
-    present = [name for name in expected_missing if name in obs.headers]
-    still_missing = [name for name in expected_missing if name not in obs.headers]
+    fetch_observed = bool(getattr(obs, "headers_observed", False))
+    fetch_redirected = bool(getattr(obs, "redirected", False))
+    present_names = list(obs.headers.keys()) + [
+        str(name) for name in getattr(obs, "headers_present", ()) or ()
+    ]
+    still_missing: list[str] = []
+    for name in expected_missing:
+        if name == HSTS_HEADER:
+            if not hsts_header_present(obs.headers, present_names):
+                still_missing.append(name)
+        elif name not in obs.headers and name not in {n.lower() for n in present_names}:
+            still_missing.append(name)
+
     evidence = _base_evidence(
         method=method,
         asset=asset,
@@ -332,11 +356,37 @@ def validate_security_headers(
             "status_code": obs.status_code,
             "final_url": obs.url,
             "reachable": obs.reachable,
+            "headers_observed": fetch_observed,
+            "redirected": fetch_redirected,
             "expected_missing": expected_missing,
             "still_missing": still_missing,
-            "observed_header_names": sorted(obs.headers.keys()),
+            "observed_header_names": sorted({n.lower() for n in present_names}),
         },
     )
+    if stored_observed is False and not expected_missing:
+        return ValidationResult(
+            status="inconclusive",
+            validation_method=method,
+            summary="No captured response-header facts were available to confirm.",
+            evidence=evidence,
+        )
+    if stored_observed is False and candidate.candidate_type == "security_header_observation":
+        return ValidationResult(
+            status="inconclusive",
+            validation_method=method,
+            summary="No captured response-header facts were available to confirm.",
+            evidence=evidence,
+        )
+    if stored_redirected or fetch_redirected:
+        return ValidationResult(
+            status="inconclusive",
+            validation_method=method,
+            summary=(
+                "Redirected responses do not provide enough captured header evidence "
+                "to confirm Strict-Transport-Security."
+            ),
+            evidence=evidence,
+        )
     if not expected_missing:
         return ValidationResult(
             status="inconclusive",
@@ -351,19 +401,29 @@ def validate_security_headers(
             summary="Asset was not reachable while confirming HTTP security headers.",
             evidence=evidence,
         )
+    if not fetch_observed:
+        return ValidationResult(
+            status="inconclusive",
+            validation_method=method,
+            summary="Confirmation request did not capture response-header facts.",
+            evidence=evidence,
+        )
     if still_missing:
         evidence["observed_header"] = still_missing[0]
         return ValidationResult(
             status="supported",
             validation_method=method,
-            summary="Security-relevant HTTP header configuration observation was reconfirmed.",
+            summary=(
+                "HTTP security header configuration observation was reconfirmed "
+                "on a captured, non-redirected response."
+            ),
             evidence=evidence,
         )
     return ValidationResult(
         status="unsupported",
         validation_method=method,
-        summary="Previously missing security headers were present during confirmation.",
-        evidence={**evidence, "present_headers": present},
+        summary="Previously absent Strict-Transport-Security was present during confirmation.",
+        evidence={**evidence, "present_headers": [HSTS_HEADER]},
     )
 
 

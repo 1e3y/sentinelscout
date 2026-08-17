@@ -15,6 +15,7 @@ from app.models.operation import Operation
 from app.models.target import AuthorizedTarget, TargetScope
 from app.services.discovery.runner import DiscoveryTools
 from app.services.discovery.scope import filter_hosts_for_scope, normalize_host
+from app.services.http_evidence import evidence_from_probe, observation_metadata
 from app.services.operations import append_event
 
 
@@ -238,6 +239,24 @@ def run_discovery(
             source="subfinder_httpx",
         )
         http_assets += 1
+        evidence = evidence_from_probe(
+            headers_observed=probe.headers_observed,
+            headers=probe.headers,
+            headers_present=probe.headers_present,
+            content_type=probe.content_type,
+            location_url=probe.location_url,
+            requested_url=probe.requested_url or normalized_url,
+            final_url=probe.final_url or normalized_url,
+            redirected=probe.redirected,
+            scheme=probe.scheme,
+        )
+        http_meta = observation_metadata(
+            evidence,
+            hostname=host,
+            status_code=probe.status_code,
+            title=probe.title or None,
+            url=normalized_url,
+        )
         _add_observation(
             db,
             organization_id=operation.organization_id,
@@ -260,12 +279,7 @@ def run_discovery(
             observation_type="http_response_observed",
             summary=f"HTTP response observed for {host}"
             + (f" ({probe.status_code})." if probe.status_code is not None else "."),
-            metadata={
-                "hostname": host,
-                "url": normalized_url,
-                "status_code": probe.status_code,
-                "title": (probe.title or None),
-            },
+            metadata=http_meta,
             source="httpx",
         )
         append_event(
