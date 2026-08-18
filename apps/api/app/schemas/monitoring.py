@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -22,4 +23,4 @@ class MonitoringConfigurationResponse(BaseModel):
     disabled_reason: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
-    latest_changes: dict[str, int] = Field(default_factory=dict)
+    latest_changes: dict[str, Any] = Field(default_factory=dict)

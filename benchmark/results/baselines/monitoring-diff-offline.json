@@ -1,0 +1,181 @@
+{
+  "candidates": {
+    "emitted": 1,
+    "expected_present": 1,
+    "false_positives_vs_not_candidates": [],
+    "misses": [
+      "admin-stable.diff.bench.example/exposed_admin_interface"
+    ],
+    "precision_desirable": 0.0,
+    "precision_rule_faithful": 0.0,
+    "recall": 0.0,
+    "unexpected": [
+      "diff.bench.example/staging_dev_exposed"
+    ]
+  },
+  "coverage": {
+    "actual": {
+      "candidates_generated": 1,
+      "clearance_language": false,
+      "configured_exclusions": [],
+      "discarded_out_of_scope": 0,
+      "findings": 0,
+      "frozen_surface_matches_live": true,
+      "header_evidence_unavailable": 2,
+      "headers_captured": 9,
+      "headline": "Scout evaluated 11/12 in-scope hostnames with usable HTTP observations using 10 supported check classes. 1 in-scope hostname(s) produced no usable HTTP observation. Response headers were captured on 9/11 HTTP observations; header evidence was unavailable on 2/11. 12 capability class(es) are outside current Scout capability. No findings were promoted. That is not evidence that the application is secure.",
+      "host_not_reachable": 0,
+      "http_observation_not_obtained": 1,
+      "http_observation_obtained": 11,
+      "in_scope_discovered": 12,
+      "probe_no_result": 1,
+      "submitted_for_http_observation": 12,
+      "validations_inconclusive": 0
+    },
+    "all_correct": null,
+    "matches": {},
+    "note": "Operation-scoped coverage accounting. Independent of candidate precision. Not a security score."
+  },
+  "diff": {
+    "all_correct": true,
+    "capability_change": {
+      "change_types": [
+        "capability_manifest_changed"
+      ],
+      "comparability": "partial_capability",
+      "correct": true,
+      "has_candidate_signal": false,
+      "has_capability_manifest_changed": true,
+      "has_resolved_regression": false
+    },
+    "cases": {
+      "run1": {
+        "actual": [],
+        "baseline_operation_id": "4000fd46-c396-4620-965e-6101c691fed2",
+        "comparability": "comparable",
+        "correct": true,
+        "direction_mismatches": [],
+        "expected": [],
+        "extra": [],
+        "forbidden": [],
+        "lost_reason_ok": true,
+        "missing": [],
+        "operation_id": "0833a0b6-1ab7-441e-a14c-3b8616933a51",
+        "security_signal_baseline_unavailable": true,
+        "silent_hits": []
+      },
+      "run2": {
+        "actual": [
+          "hostname_newly_discovered|added.diff.bench.example",
+          "hostname_newly_discovered|admin-new.diff.bench.example",
+          "header_evidence_became_available|headers-late.diff.bench.example",
+          "header_evidence_became_unavailable|headers-lost.diff.bench.example",
+          "regression_header_evidence_lost|headers-lost.diff.bench.example",
+          "selected_header_presence_changed|hsts-lost.diff.bench.example",
+          "regression_hsts_lost|hsts-lost.diff.bench.example",
+          "http_observation_gained|recovered.diff.bench.example",
+          "http_observation_lost|silent.diff.bench.example",
+          "response_status_changed|status.diff.bench.example",
+          "response_title_changed|title.diff.bench.example",
+          "final_url_changed|url.diff.bench.example",
+          "http_observation_coverage_changed|http_observation_coverage_changed",
+          "header_evidence_coverage_changed|header_evidence_coverage_changed",
+          "candidate_new|admin-new.diff.bench.example|exposed_admin_interface",
+          "candidate_new|hsts-lost.diff.bench.example|security_header_observation"
+        ],
+        "baseline_operation_id": "0833a0b6-1ab7-441e-a14c-3b8616933a51",
+        "comparability": "comparable",
+        "correct": true,
+        "direction_mismatches": [],
+        "expected": [
+          "hostname_newly_discovered|added.diff.bench.example",
+          "hostname_newly_discovered|admin-new.diff.bench.example",
+          "http_observation_lost|silent.diff.bench.example",
+          "http_observation_gained|recovered.diff.bench.example",
+          "response_title_changed|title.diff.bench.example",
+          "response_status_changed|status.diff.bench.example",
+          "final_url_changed|url.diff.bench.example",
+          "header_evidence_became_available|headers-late.diff.bench.example",
+          "header_evidence_became_unavailable|headers-lost.diff.bench.example",
+          "regression_header_evidence_lost|headers-lost.diff.bench.example",
+          "selected_header_presence_changed|hsts-lost.diff.bench.example",
+          "regression_hsts_lost|hsts-lost.diff.bench.example",
+          "candidate_new|hsts-lost.diff.bench.example|security_header_observation",
+          "candidate_new|admin-new.diff.bench.example|exposed_admin_interface",
+          "http_observation_coverage_changed|http_observation_coverage_changed",
+          "header_evidence_coverage_changed|header_evidence_coverage_changed"
+        ],
+        "extra": [],
+        "forbidden": [],
+        "lost_reason_ok": true,
+        "missing": [],
+        "operation_id": "1d30ac2f-f3c7-4d25-8f70-693e901dec0a",
+        "security_signal_baseline_unavailable": false,
+        "silent_hits": []
+      },
+      "run3": {
+        "actual": [],
+        "baseline_operation_id": "1d30ac2f-f3c7-4d25-8f70-693e901dec0a",
+        "comparability": "comparable",
+        "correct": true,
+        "direction_mismatches": [],
+        "expected": [],
+        "extra": [],
+        "forbidden": [],
+        "lost_reason_ok": true,
+        "missing": [],
+        "operation_id": "66166058-4e6e-4e14-ac4a-e3780023fd9b",
+        "security_signal_baseline_unavailable": false,
+        "silent_hits": []
+      },
+      "run_scope": {
+        "actual": [
+          "scope_changed|scope"
+        ],
+        "baseline_operation_id": "66166058-4e6e-4e14-ac4a-e3780023fd9b",
+        "comparability": "not_comparable_scope",
+        "correct": true,
+        "direction_mismatches": [],
+        "expected": [
+          "scope_changed|scope"
+        ],
+        "extra": [],
+        "forbidden": [],
+        "lost_reason_ok": true,
+        "missing": [],
+        "operation_id": "9dfccb67-7614-4b4a-abf2-f078afeb972e",
+        "security_signal_baseline_unavailable": false,
+        "silent_hits": []
+      }
+    },
+    "note": "Operation-scoped monitoring diff. Independent of candidate precision. Not a security score."
+  },
+  "duration_ms": 2841,
+  "fixture_id": "monitoring-diff",
+  "git_sha": "56957965f39763ea8f091198a9f24e1c98c15ad6",
+  "known_misses": [],
+  "live_discovery": null,
+  "mode": "offline",
+  "operation_id": "1d30ac2f-f3c7-4d25-8f70-693e901dec0a",
+  "overlaps": [],
+  "pipeline_assets": {
+    "expected": 12,
+    "extra": [],
+    "found": 11,
+    "missing": [
+      "silent.diff.bench.example"
+    ],
+    "note": "Offline/local seeded-host pipeline: whether Scout scoped, probed, persisted, and processed hosts it was handed. Not internet discovery recall.",
+    "pipeline_asset_precision": 1.0,
+    "pipeline_asset_recall": 0.9167
+  },
+  "retest": null,
+  "schema_version": 1,
+  "validation": {
+    "disagreements": [],
+    "expected_supported": 0,
+    "support_rate": null,
+    "supported": 0
+  },
+  "warnings": []
+}

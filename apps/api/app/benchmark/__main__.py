@@ -29,7 +29,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     run.add_argument(
         "--all",
         action="store_true",
-        help="Default CI pack: visible-surface + naming-traps + header-surface + coverage-gaps (not retest-delta)",
+        help="Default CI pack: visible-surface + naming-traps + header-surface + coverage-gaps + monitoring-diff (not retest-delta)",
     )
     run.add_argument("--mode", choices=("offline", "local_live"), default="offline")
     run.add_argument("--save", action="store_true", help="Write JSON under benchmark/results/")

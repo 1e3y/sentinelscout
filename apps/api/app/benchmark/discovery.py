@@ -6,6 +6,9 @@ import json
 import shutil
 import subprocess
 
+from dataclasses import replace
+from typing import Any
+
 from app.benchmark.ground_truth import GroundTruth
 from app.benchmark.http_loopback import LoopbackSafeHttpClient
 from app.services.coverage import EXPLICIT_PROBE_OUTCOMES
@@ -65,6 +68,8 @@ class SeededLoopbackDiscoveryTools:
         self.probe_outcome_by_host: dict[str, str] = {
             row.hostname: row.probe_outcome for row in truth.assets
         }
+        self.host_override: list[str] | None = None
+        self.probe_overrides_by_host: dict[str, dict[str, Any]] = {}
         for site in truth.sites:
             if site.hostname not in self.path_by_host:
                 self.path_by_host[site.hostname] = site.path or "/"
@@ -72,6 +77,8 @@ class SeededLoopbackDiscoveryTools:
             self.capture_headers_by_host[site.hostname] = prev and site.capture_headers
 
     def discover_hosts(self, domain: str) -> tuple[list[str], str | None]:
+        if self.host_override is not None:
+            return list(self.host_override), None
         root = domain.lower().rstrip(".")
         hosts = [host for host in self.truth.hostnames if host == root or host.endswith(f".{root}")]
         return hosts, None
@@ -97,13 +104,22 @@ class SeededLoopbackDiscoveryTools:
             obs = self.client.fetch(canonical, method="GET")
             if not obs.reachable:
                 continue
-            results.append(
-                _probe_from_observation(
-                    canonical=canonical,
-                    obs=obs,
-                    capture_headers=self.capture_headers_by_host.get(host, True),
-                )
+            result = _probe_from_observation(
+                canonical=canonical,
+                obs=obs,
+                capture_headers=self.capture_headers_by_host.get(host, True),
             )
+            overrides = dict(self.probe_overrides_by_host.get(host) or {})
+            if overrides:
+                if "headers_present" in overrides:
+                    overrides["headers_present"] = tuple(overrides["headers_present"])
+                allowed = {
+                    key: value
+                    for key, value in overrides.items()
+                    if key in ProbeResult.__dataclass_fields__
+                }
+                result = replace(result, **allowed)
+            results.append(result)
         return results
 
 

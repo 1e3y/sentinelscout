@@ -68,6 +68,7 @@ treat the DNS label `test` as a staging marker.
 | `naming-traps` | yes | Marker-category traps and recall anchors (`devshop`, `administrator-training`, dashboard title, `grafana-training` / `jenkins-docs`, plus exact-label `grafana` / `jenkins`) |
 | `header-surface` | yes | HSTS present / missing / JSON / capture-unavailable / redirect-final-only |
 | `coverage-gaps` | yes | Coverage accounting: all-observed, probe no-result, known-unreachable, header capture unavailable, validation inconclusive, excluded host |
+| `monitoring-diff` | yes | Multi-run comparison: snapshot-to-snapshot diffs, probe_no_result vs removal, scope change, capability suppression |
 | `retest-delta` | **no** | Fixture C: take staging down, expect a passing retest. Run explicitly until the harness is trusted |
 
 ## Commands
@@ -75,7 +76,7 @@ treat the DNS label `test` as a staging marker.
 From `apps/api` (Postgres required; uses `DATABASE_URL`):
 
 ```bash
-# Default CI pack (A + B + header-surface + coverage-gaps), offline
+# Default CI pack (A + B + header-surface + coverage-gaps + monitoring-diff), offline
 uv run python -m app.benchmark run --all --mode offline --save
 
 # Single fixture
@@ -84,6 +85,8 @@ uv run python -m app.benchmark run --fixture naming-traps --mode offline --save
 uv run python -m app.benchmark run --fixture header-surface --mode offline --save
 
 uv run python -m app.benchmark run --fixture coverage-gaps --mode offline --save
+
+uv run python -m app.benchmark run --fixture monitoring-diff --mode offline --save
 
 # Fixture C — explicit only, not the default CI pack
 uv run python -m app.benchmark run --fixture retest-delta --mode offline --save

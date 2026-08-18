@@ -22,6 +22,7 @@ from app.core.db import Base
 
 if TYPE_CHECKING:
     from app.models.coverage import OperationCoverageSummary
+    from app.models.diff import OperationDiffSummary
     from app.models.operation_controls import OperationControlSnapshot
     from app.models.organization import Organization
     from app.models.target import AuthorizedTarget
@@ -92,6 +93,13 @@ class Operation(Base):
         back_populates="operation",
         uselist=False,
         cascade="all, delete-orphan",
+    )
+    diff_summary: Mapped[OperationDiffSummary | None] = relationship(
+        "OperationDiffSummary",
+        back_populates="operation",
+        uselist=False,
+        cascade="all, delete-orphan",
+        foreign_keys="OperationDiffSummary.operation_id",
     )
 
 

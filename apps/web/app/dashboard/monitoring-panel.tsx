@@ -175,9 +175,30 @@ export function MonitoringPanel({ enabled }: Props) {
                   <dt className="text-zinc-500">Latest changes</dt>
                   <dd>
                     <ul className="list-disc pl-4 text-xs text-zinc-600">
-                      <li>{changes.new ?? 0} new assets</li>
-                      <li>{changes.gone ?? 0} assets no longer observed</li>
-                      <li>{changes.changed ?? 0} response changes</li>
+                      <li>
+                        Comparability{" "}
+                        {String(changes.comparability ?? "no_baseline")}
+                      </li>
+                      <li>
+                        {Number(changes.hostname_newly_discovered ?? 0)} hostnames
+                        newly discovered
+                      </li>
+                      <li>
+                        {Number(changes.hostname_no_longer_discovered ?? 0)}{" "}
+                        hostnames no longer discovered
+                      </li>
+                      <li>
+                        {Number(changes.http_observation_gained ?? 0)} HTTP
+                        observations gained
+                      </li>
+                      <li>
+                        {Number(changes.http_observation_lost ?? 0)} HTTP
+                        observations lost
+                      </li>
+                      <li>
+                        {Number(changes.regressions ?? 0)} conservative
+                        regressions
+                      </li>
                     </ul>
                   </dd>
                 </div>

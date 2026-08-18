@@ -2,6 +2,7 @@ from app.models.asset import Asset, DiscoveryObservation
 from app.models.audit import AuditEvent
 from app.models.candidate import SecurityCandidate
 from app.models.coverage import OperationCoverageSummary
+from app.models.diff import OperationDiffSummary
 from app.models.finding import Finding
 from app.models.monitoring import MonitoringConfiguration
 from app.models.operation import Operation, OperationEvent
@@ -24,6 +25,7 @@ __all__ = [
     "OperationEvent",
     "OperationControlSnapshot",
     "OperationCoverageSummary",
+    "OperationDiffSummary",
     "Asset",
     "DiscoveryObservation",
     "SecurityCandidate",

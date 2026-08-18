@@ -1,0 +1,293 @@
+schema_version: 1
+fixture_id: monitoring-diff
+scope:
+  root: diff.bench.example
+  include_subdomains: true
+  exclusions: []
+default_response_headers:
+  Strict-Transport-Security: max-age=31536000
+sites:
+  - hostname: diff.bench.example
+    path: /
+    html: headers-ok.bench.example/index.html
+  - hostname: silent.diff.bench.example
+    path: /
+    html: headers-ok.bench.example/index.html
+  - hostname: recovered.diff.bench.example
+    path: /
+    html: headers-ok.bench.example/index.html
+  - hostname: title.diff.bench.example
+    path: /
+    html: headers-ok.bench.example/index.html
+  - hostname: status.diff.bench.example
+    path: /
+    html: headers-ok.bench.example/index.html
+  - hostname: url.diff.bench.example
+    path: /
+    html: headers-ok.bench.example/index.html
+  - hostname: headers-late.diff.bench.example
+    path: /
+    html: headers-ok.bench.example/index.html
+    capture_headers: false
+  - hostname: headers-lost.diff.bench.example
+    path: /
+    html: headers-ok.bench.example/index.html
+  - hostname: hsts-lost.diff.bench.example
+    path: /
+    html: headers-missing.bench.example/index.html
+  - hostname: admin-stable.diff.bench.example
+    path: /
+    html: headers-ok.bench.example/index.html
+  - hostname: added.diff.bench.example
+    path: /
+    html: headers-ok.bench.example/index.html
+    capture_headers: false
+  - hostname: admin-new.diff.bench.example
+    path: /
+    html: headers-ok.bench.example/index.html
+assets:
+  - hostname: diff.bench.example
+    reachable: true
+  - hostname: silent.diff.bench.example
+    reachable: true
+  - hostname: recovered.diff.bench.example
+    reachable: true
+  - hostname: title.diff.bench.example
+    reachable: true
+  - hostname: status.diff.bench.example
+    reachable: true
+  - hostname: url.diff.bench.example
+    reachable: true
+  - hostname: headers-late.diff.bench.example
+    reachable: true
+  - hostname: headers-lost.diff.bench.example
+    reachable: true
+  - hostname: hsts-lost.diff.bench.example
+    reachable: true
+  - hostname: admin-stable.diff.bench.example
+    reachable: true
+  - hostname: added.diff.bench.example
+    reachable: true
+  - hostname: admin-new.diff.bench.example
+    reachable: true
+candidates:
+  - id: admin-stable
+    hostname: admin-stable.diff.bench.example
+    candidate_type: exposed_admin_interface
+    expected: present
+    desirable: true
+not_candidates: []
+overlaps: []
+known_misses: []
+retest: []
+diff:
+  baseline_hosts: &baseline_hosts
+    - diff.bench.example
+    - silent.diff.bench.example
+    - recovered.diff.bench.example
+    - title.diff.bench.example
+    - status.diff.bench.example
+    - url.diff.bench.example
+    - headers-late.diff.bench.example
+    - headers-lost.diff.bench.example
+    - hsts-lost.diff.bench.example
+    - admin-stable.diff.bench.example
+  changed_hosts: &changed_hosts
+    - diff.bench.example
+    - silent.diff.bench.example
+    - recovered.diff.bench.example
+    - title.diff.bench.example
+    - status.diff.bench.example
+    - url.diff.bench.example
+    - headers-late.diff.bench.example
+    - headers-lost.diff.bench.example
+    - hsts-lost.diff.bench.example
+    - admin-stable.diff.bench.example
+    - added.diff.bench.example
+    - admin-new.diff.bench.example
+  runs:
+    - id: legacy
+      simulate_pre_m18: true
+      hosts: *baseline_hosts
+      probe_outcomes:
+        recovered.diff.bench.example: no_result
+      capture_headers:
+        headers-late.diff.bench.example: false
+      probe_overrides:
+        title.diff.bench.example:
+          title: Alpha
+        status.diff.bench.example:
+          status_code: 200
+        hsts-lost.diff.bench.example:
+          headers:
+            content-type: text/html
+            strict-transport-security: max-age=31536000
+          headers_present:
+            - content-type
+            - strict-transport-security
+          headers_observed: true
+          content_type: text/html
+          scheme: https
+          redirected: false
+    - id: run1
+      hosts: *baseline_hosts
+      probe_outcomes:
+        recovered.diff.bench.example: no_result
+      capture_headers:
+        headers-late.diff.bench.example: false
+      probe_overrides:
+        title.diff.bench.example:
+          title: Alpha
+        status.diff.bench.example:
+          status_code: 200
+        hsts-lost.diff.bench.example:
+          headers:
+            content-type: text/html
+            strict-transport-security: max-age=31536000
+          headers_present:
+            - content-type
+            - strict-transport-security
+          headers_observed: true
+          content_type: text/html
+          scheme: https
+          redirected: false
+      expect:
+        comparability: comparable
+        security_signal_baseline_unavailable: true
+        changes: []
+        forbid_change_types:
+          - candidate_new
+          - candidate_no_longer_emitted
+          - coverage_improved
+          - coverage_degraded
+    - id: run2
+      hosts: *changed_hosts
+      probe_outcomes:
+        silent.diff.bench.example: no_result
+      capture_headers:
+        headers-late.diff.bench.example: true
+        headers-lost.diff.bench.example: false
+        added.diff.bench.example: false
+      probe_overrides:
+        title.diff.bench.example:
+          title: Beta
+        status.diff.bench.example:
+          status_code: 201
+        url.diff.bench.example:
+          final_url: https://url.diff.bench.example/app
+          redirected: true
+        hsts-lost.diff.bench.example:
+          headers:
+            content-type: text/html
+          headers_present:
+            - content-type
+          headers_observed: true
+          content_type: text/html
+          scheme: https
+          redirected: false
+      expect:
+        comparability: comparable
+        security_signal_baseline_unavailable: false
+        changes:
+          - { change_type: hostname_newly_discovered, match_key: added.diff.bench.example }
+          - { change_type: hostname_newly_discovered, match_key: admin-new.diff.bench.example }
+          - { change_type: http_observation_lost, match_key: silent.diff.bench.example }
+          - { change_type: http_observation_gained, match_key: recovered.diff.bench.example }
+          - { change_type: response_title_changed, match_key: title.diff.bench.example }
+          - { change_type: response_status_changed, match_key: status.diff.bench.example }
+          - { change_type: final_url_changed, match_key: url.diff.bench.example }
+          - { change_type: header_evidence_became_available, match_key: headers-late.diff.bench.example }
+          - { change_type: header_evidence_became_unavailable, match_key: headers-lost.diff.bench.example }
+          - { change_type: regression_header_evidence_lost, match_key: headers-lost.diff.bench.example }
+          - { change_type: selected_header_presence_changed, match_key: hsts-lost.diff.bench.example }
+          - { change_type: regression_hsts_lost, match_key: hsts-lost.diff.bench.example }
+          - { change_type: candidate_new, match_key: hsts-lost.diff.bench.example|security_header_observation }
+          - { change_type: candidate_new, match_key: admin-new.diff.bench.example|exposed_admin_interface }
+          - { change_type: http_observation_coverage_changed, match_key: http_observation_coverage_changed }
+          - { change_type: header_evidence_coverage_changed, match_key: header_evidence_coverage_changed }
+        coverage_directions:
+          http_observation_coverage_changed: improved
+          header_evidence_coverage_changed: degraded
+        silent_match_keys:
+          - diff.bench.example
+          - admin-stable.diff.bench.example|exposed_admin_interface
+        forbid_change_types:
+          - coverage_improved
+          - coverage_degraded
+          - hostname_no_longer_discovered
+        lost_reason_code: probe_no_result
+    - id: run3
+      mutate_live_before: true
+      hosts: *changed_hosts
+      probe_outcomes:
+        silent.diff.bench.example: no_result
+      capture_headers:
+        headers-late.diff.bench.example: true
+        headers-lost.diff.bench.example: false
+        added.diff.bench.example: false
+      probe_overrides:
+        title.diff.bench.example:
+          title: Beta
+        status.diff.bench.example:
+          status_code: 201
+        url.diff.bench.example:
+          final_url: https://url.diff.bench.example/app
+          redirected: true
+        hsts-lost.diff.bench.example:
+          headers:
+            content-type: text/html
+          headers_present:
+            - content-type
+          headers_observed: true
+          content_type: text/html
+          scheme: https
+          redirected: false
+      expect:
+        comparability: comparable
+        security_signal_baseline_unavailable: false
+        changes: []
+        forbid_change_types:
+          - candidate_new
+          - candidate_no_longer_emitted
+          - coverage_improved
+          - coverage_degraded
+    - id: run_scope
+      exclusions:
+        - added.diff.bench.example
+      hosts: *changed_hosts
+      probe_outcomes:
+        silent.diff.bench.example: no_result
+      capture_headers:
+        headers-late.diff.bench.example: true
+        headers-lost.diff.bench.example: false
+        added.diff.bench.example: false
+      probe_overrides:
+        title.diff.bench.example:
+          title: Beta
+        status.diff.bench.example:
+          status_code: 201
+        url.diff.bench.example:
+          final_url: https://url.diff.bench.example/app
+          redirected: true
+        hsts-lost.diff.bench.example:
+          headers:
+            content-type: text/html
+          headers_present:
+            - content-type
+          headers_observed: true
+          content_type: text/html
+          scheme: https
+          redirected: false
+      expect:
+        comparability: not_comparable_scope
+        changes:
+          - { change_type: scope_changed, match_key: scope }
+        forbid_change_types:
+          - hostname_newly_discovered
+          - hostname_no_longer_discovered
+          - http_observation_lost
+          - http_observation_gained
+          - candidate_new
+          - candidate_no_longer_emitted
+          - coverage_improved
+          - coverage_degraded

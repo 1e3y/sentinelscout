@@ -109,6 +109,8 @@ def validate_result(result: dict[str, Any]) -> None:
 
     if result.get("coverage") is not None and not isinstance(result["coverage"], dict):
         raise ValueError("coverage must be an object when present")
+    if result.get("diff") is not None and not isinstance(result["diff"], dict):
+        raise ValueError("diff must be an object when present")
 
     if result["mode"] == "offline" and result.get("live_discovery") is not None:
         raise ValueError("offline results must not include live_discovery metrics")

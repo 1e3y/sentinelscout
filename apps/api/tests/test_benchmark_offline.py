@@ -33,6 +33,7 @@ def test_default_ci_pack_excludes_retest_delta():
         "naming-traps",
         "header-surface",
         "coverage-gaps",
+        "monitoring-diff",
     )
     assert "retest-delta" not in DEFAULT_CI_FIXTURES
 
@@ -44,6 +45,7 @@ def test_ground_truth_uses_bench_example_namespace():
         "retest-delta",
         "header-surface",
         "coverage-gaps",
+        "monitoring-diff",
     ):
         truth = load_ground_truth(fixture_id)
         assert truth.root == "bench.example" or truth.root.endswith(".bench.example")
@@ -94,6 +96,8 @@ def test_offline_ci_pack_schema_and_report_only_baseline(db_session, monkeypatch
             assert actual["http_observation_obtained"] == 4
             assert actual["header_evidence_unavailable"] == 1
             assert actual["discarded_out_of_scope"] == 1
+        if fixture_id == "monitoring-diff":
+            assert result["diff"]["all_correct"] is True, result["diff"]
 
     pack = compare_pack(results_dir=tmp_path, mode="offline")
     printed = format_compare(pack)
@@ -102,7 +106,7 @@ def test_offline_ci_pack_schema_and_report_only_baseline(db_session, monkeypatch
     assert "REPORT-ONLY" in captured.out
     assert pack["fails_ci"] is False
     assert pack["policy"] == "report_only"
-    assert len(results) == 4
+    assert len(results) == 5
 
 
 def test_offline_mode_does_not_call_subprocess_discovery(db_session, monkeypatch):

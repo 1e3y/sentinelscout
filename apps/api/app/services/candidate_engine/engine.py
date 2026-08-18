@@ -121,5 +121,5 @@ def generate_candidates_for_operation(db: Session, operation: Operation) -> list
                 db.flush()
                 created_or_updated.append(existing)
 
-    db.commit()
+    db.flush()
     return created_or_updated

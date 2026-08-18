@@ -318,19 +318,23 @@ def test_change_detection_new_gone_and_changed(
 
     events = client.get(f"/v1/operations/{op2}/events", headers=_auth(token)).json()
     types = [e["event_type"] for e in events]
-    assert "asset.new_since_previous" in types
-    assert "asset.no_longer_observed" in types
-    assert "asset.response_changed" in types
-    # First op should not have change events (no previous).
+    assert "asset.new_since_previous" not in types
+    assert "asset.no_longer_observed" not in types
+    assert "asset.response_changed" not in types
+
+    diff = client.get(f"/v1/operations/{op2}/diff", headers=_auth(token)).json()
+    change_types = {row["change_type"] for row in diff["changes"]}
+    assert "hostname_newly_discovered" in change_types
+    assert "hostname_no_longer_discovered" in change_types
+    assert "response_status_changed" in change_types or "response_title_changed" in change_types
     events1 = client.get(f"/v1/operations/{op1}/events", headers=_auth(token)).json()
     assert "asset.new_since_previous" not in [e["event_type"] for e in events1]
 
     monitoring = client.get(
         f"/v1/targets/{target_id}/monitoring", headers=_auth(token)
     ).json()
-    assert monitoring["latest_changes"]["new"] >= 1
-    assert monitoring["latest_changes"]["gone"] >= 1
-    assert monitoring["latest_changes"]["changed"] >= 1
+    assert monitoring["latest_changes"]["hostname_newly_discovered"] >= 1
+    assert monitoring["latest_changes"]["hostname_no_longer_discovered"] >= 1
 
 
 def test_monitoring_data_persists_and_synthetic_cycle(

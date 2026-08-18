@@ -24,8 +24,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.models.operation import Operation
 from app.services.audit import record_audit
 from app.services.candidate_engine import generate_candidates_for_operation
-from app.services.change_detection import detect_and_persist_changes
 from app.services.coverage import freeze_operation_coverage
+from app.services.diff import freeze_operation_diff
 from app.services.discovery.execute import (
     AuthorizationExecutionError,
     StopRequested,
@@ -94,6 +94,11 @@ def _reload(db: Session, operation_id: UUID) -> Operation:
     return operation
 
 
+def _freeze_terminal(db: Session, operation: Operation, *, source: str = "frozen") -> None:
+    freeze_operation_coverage(db, operation, source=source, actor_type="worker")
+    freeze_operation_diff(db, operation, source=source, actor_type="worker")
+
+
 def _mark_stopped(db: Session, operation: Operation, *, summary: str) -> Operation:
     operation.status = "stopped"
     operation.stopped_at = datetime.now(timezone.utc)
@@ -121,7 +126,7 @@ def _mark_stopped(db: Session, operation: Operation, *, summary: str) -> Operati
             "source": operation.source,
         },
     )
-    freeze_operation_coverage(db, operation, source="frozen", actor_type="worker")
+    _freeze_terminal(db, operation, source="frozen")
     db.commit()
     db.refresh(operation)
     return operation
@@ -161,7 +166,7 @@ def _mark_failed(
             "source": operation.source,
         },
     )
-    freeze_operation_coverage(db, operation, source="frozen", actor_type="worker")
+    _freeze_terminal(db, operation, source="frozen")
     db.commit()
     db.refresh(operation)
     return operation
@@ -194,7 +199,7 @@ def _mark_completed(db: Session, operation: Operation) -> Operation:
             "testing_profile": operation.testing_profile,
         },
     )
-    freeze_operation_coverage(db, operation, source="frozen", actor_type="worker")
+    _freeze_terminal(db, operation, source="frozen")
     db.commit()
     db.refresh(operation)
     return operation
@@ -209,7 +214,7 @@ def execute_discovery_job(
     operation = _reload(db, operation_id)
     if operation.status != "running":
         if operation.status in {"completed", "stopped", "failed"}:
-            freeze_operation_coverage(db, operation, source="recovered", actor_type="worker")
+            _freeze_terminal(db, operation, source="recovered")
             db.commit()
             db.refresh(operation)
         return operation
@@ -233,14 +238,6 @@ def execute_discovery_job(
                 return _mark_stopped(db, operation, summary="Scout operation stopped.")
             return operation
 
-        detect_and_persist_changes(db, operation)
-
-        operation = _reload(db, operation_id)
-        if should_stop():
-            if operation.status != "stopped":
-                return _mark_stopped(db, operation, summary="Scout operation stopped.")
-            return operation
-
         generate_candidates_for_operation(db, operation)
 
         operation = _reload(db, operation_id)
@@ -253,14 +250,14 @@ def execute_discovery_job(
         operation = _reload(db, operation_id)
         if operation.status != "stopped":
             return _mark_stopped(db, operation, summary="Scout operation stopped.")
-        freeze_operation_coverage(db, operation, source="recovered", actor_type="worker")
+        _freeze_terminal(db, operation, source="recovered")
         db.commit()
         return operation
     except AuthorizationExecutionError:
         logger.warning("authorization failure for operation %s", operation_id)
         operation = _reload(db, operation_id)
         if operation.status in {"completed", "stopped", "failed"}:
-            freeze_operation_coverage(db, operation, source="recovered", actor_type="worker")
+            _freeze_terminal(db, operation, source="recovered")
             db.commit()
             return operation
         return _mark_failed(
@@ -281,7 +278,7 @@ def execute_discovery_job(
         logger.exception("discovery failed for operation %s", operation_id)
         operation = _reload(db, operation_id)
         if operation.status in {"completed", "stopped", "failed"}:
-            freeze_operation_coverage(db, operation, source="recovered", actor_type="worker")
+            _freeze_terminal(db, operation, source="recovered")
             db.commit()
             return operation
         return _mark_failed(db, operation, error_code=code, error_message=public)
@@ -289,7 +286,7 @@ def execute_discovery_job(
         logger.exception("unexpected discovery failure for operation %s", operation_id)
         operation = _reload(db, operation_id)
         if operation.status in {"completed", "stopped", "failed"}:
-            freeze_operation_coverage(db, operation, source="recovered", actor_type="worker")
+            _freeze_terminal(db, operation, source="recovered")
             db.commit()
             return operation
         return _mark_failed(db, operation)

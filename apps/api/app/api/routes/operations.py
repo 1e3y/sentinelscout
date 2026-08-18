@@ -11,6 +11,7 @@ from app.schemas.candidate import SecurityCandidateResponse
 from app.schemas.discovery import AssetResponse, DiscoveryObservationResponse
 from app.schemas.audit import OperationControlSnapshotResponse
 from app.schemas.coverage import OperationCoverageResponse
+from app.schemas.diff import OperationDiffResponse
 from app.schemas.operation import (
     CreateOperationRequest,
     OperationEventResponse,
@@ -19,6 +20,7 @@ from app.schemas.operation import (
 from app.services.operations import (
     create_operation,
     get_operation_coverage,
+    get_operation_diff,
     get_operation_or_404,
     list_operation_assets,
     list_operation_candidates,
@@ -185,6 +187,18 @@ def get_coverage_endpoint(
         db, operation_id=operation_id, user_id=auth.user.id
     )
     return OperationCoverageResponse.model_validate(payload)
+
+
+@router.get("/{operation_id}/diff", response_model=OperationDiffResponse)
+def get_diff_endpoint(
+    operation_id: UUID,
+    auth: Annotated[AuthContext, Depends(get_auth_context)],
+    db: Annotated[Session, Depends(get_db)],
+) -> OperationDiffResponse:
+    payload = get_operation_diff(
+        db, operation_id=operation_id, user_id=auth.user.id
+    )
+    return OperationDiffResponse.model_validate(payload)
 
 
 @router.get("/{operation_id}/candidates", response_model=list[SecurityCandidateResponse])

@@ -184,9 +184,13 @@ export type MonitoringConfigurationResponse = {
   created_at: string | null;
   updated_at: string | null;
   latest_changes: {
-    new?: number;
-    gone?: number;
-    changed?: number;
+    comparability?: string;
+    hostname_newly_discovered?: number;
+    hostname_no_longer_discovered?: number;
+    http_observation_gained?: number;
+    http_observation_lost?: number;
+    regressions?: number;
+    [key: string]: string | number | boolean | undefined;
   };
 };
 
@@ -505,6 +509,55 @@ export function fetchOperationCoverage(
 ): Promise<OperationCoverageResponse> {
   return apiFetch<OperationCoverageResponse>(
     `/v1/operations/${operationId}/coverage`,
+    token,
+  );
+}
+
+export type OperationDiffChange = {
+  category: string;
+  change_type: string;
+  significance: string;
+  match_key: string | null;
+  before: unknown;
+  after: unknown;
+  explanation: string;
+};
+
+export type OperationDiffResponse = {
+  schema_version: number;
+  source: string;
+  frozen_at: string | null;
+  comparability: string;
+  baseline_operation_id: string | null;
+  baseline_completed_at: string | null;
+  current_source: string | null;
+  baseline_source: string | null;
+  operation_status_at_freeze: string | null;
+  security_signal_baseline_unavailable: boolean;
+  security_signal_comparison_suppressed: boolean;
+  security_signal_suppression_reason: string | null;
+  headline: string;
+  counts: Record<string, unknown>;
+  changes: OperationDiffChange[];
+  comparison_snapshot: Record<string, unknown>;
+  follow_up_findings: Array<{
+    change_type: string;
+    hostname: string;
+    candidate_type: string;
+    finding_id: string;
+    status: string;
+    created_at: string | null;
+    updated_at: string | null;
+    resolved_at: string | null;
+  }>;
+};
+
+export function fetchOperationDiff(
+  token: string,
+  operationId: string,
+): Promise<OperationDiffResponse> {
+  return apiFetch<OperationDiffResponse>(
+    `/v1/operations/${operationId}/diff`,
     token,
   );
 }

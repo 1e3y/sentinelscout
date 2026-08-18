@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from typing import Any
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -10,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.monitoring import MONITORING_FREQUENCIES, MonitoringConfiguration
-from app.models.operation import Operation, OperationEvent
+from app.services.diff import latest_diff_counts
 from app.models.organization import OrganizationMembership
 from app.models.target import AuthorizedTarget
 from app.models.user import User
@@ -162,28 +163,6 @@ def target_authorized_for_monitoring(target: AuthorizedTarget) -> tuple[bool, st
     return True, None
 
 
-def latest_change_counts(db: Session, *, target_id: UUID) -> dict[str, int]:
-    """Count change events from the most recent completed operation for the target."""
-    operation = db.scalar(
-        select(Operation)
-        .where(
-            Operation.target_id == target_id,
-            Operation.status == "completed",
-        )
-        .order_by(Operation.completed_at.desc().nullslast())
-        .limit(1)
-    )
-    if operation is None:
-        return {"new": 0, "gone": 0, "changed": 0}
-    events = db.scalars(
-        select(OperationEvent).where(OperationEvent.operation_id == operation.id)
-    ).all()
-    counts = {"new": 0, "gone": 0, "changed": 0}
-    for event in events:
-        if event.event_type == "asset.new_since_previous":
-            counts["new"] += 1
-        elif event.event_type == "asset.no_longer_observed":
-            counts["gone"] += 1
-        elif event.event_type == "asset.response_changed":
-            counts["changed"] += 1
-    return counts
+def latest_change_counts(db: Session, *, target_id: UUID) -> dict[str, Any]:
+    """Counts from the latest completed operation's immutable M18 diff snapshot."""
+    return latest_diff_counts(db, target_id=target_id)

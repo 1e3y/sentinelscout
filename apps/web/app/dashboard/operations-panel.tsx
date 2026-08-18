@@ -9,6 +9,7 @@ import {
   fetchOperationAssets,
   fetchOperationCandidates,
   fetchOperationCoverage,
+  fetchOperationDiff,
   fetchOperationEvents,
   fetchOperationObservations,
   fetchOperations,
@@ -19,6 +20,7 @@ import {
   type AssetResponse,
   type DiscoveryObservationResponse,
   type OperationCoverageResponse,
+  type OperationDiffResponse,
   type OperationEventResponse,
   type OperationResponse,
   type SecurityCandidateResponse,
@@ -47,6 +49,7 @@ export function OperationsPanel({ enabled }: Props) {
     [],
   );
   const [coverage, setCoverage] = useState<OperationCoverageResponse | null>(null);
+  const [diff, setDiff] = useState<OperationDiffResponse | null>(null);
   const [candidates, setCandidates] = useState<SecurityCandidateResponse[]>([]);
   const [validationByCandidate, setValidationByCandidate] = useState<
     Record<string, ValidationAttemptResponse[]>
@@ -79,7 +82,7 @@ export function OperationsPanel({ enabled }: Props) {
       setError("Missing session token");
       return;
     }
-    const [op, nextEvents, nextAssets, nextObservations, nextCandidates, nextCoverage] =
+    const [op, nextEvents, nextAssets, nextObservations, nextCandidates, nextCoverage, nextDiff] =
       await Promise.all([
         fetchOperation(token, operationId),
         fetchOperationEvents(token, operationId),
@@ -87,6 +90,7 @@ export function OperationsPanel({ enabled }: Props) {
         fetchOperationObservations(token, operationId),
         fetchOperationCandidates(token, operationId),
         fetchOperationCoverage(token, operationId),
+        fetchOperationDiff(token, operationId),
       ]);
     setSelected(op);
     setEvents(nextEvents);
@@ -94,6 +98,7 @@ export function OperationsPanel({ enabled }: Props) {
     setObservations(nextObservations);
     setCandidates(nextCandidates);
     setCoverage(nextCoverage);
+    setDiff(nextDiff);
     const attemptEntries = await Promise.all(
       nextCandidates.map(async (candidate) => {
         const attempts = await fetchCandidateValidationAttempts(token, candidate.id);
@@ -604,6 +609,130 @@ export function OperationsPanel({ enabled }: Props) {
                 snapshot {coverage.source}
                 {coverage.frozen_at ? ` at ${formatTime(coverage.frozen_at)}` : ""}
               </p>
+            </div>
+          ) : null}
+
+          {diff ? (
+            <div className="space-y-3 border-t border-zinc-100 pt-4">
+              <h4 className="text-sm font-medium tracking-wide text-zinc-800">
+                CHANGES SINCE PREVIOUS COMPARABLE RUN
+              </h4>
+              <p className="text-sm text-zinc-700">{diff.headline}</p>
+              <p className="text-xs text-zinc-500">
+                Comparability {diff.comparability}
+                {diff.baseline_operation_id
+                  ? ` · baseline ${diff.baseline_operation_id}`
+                  : ""}
+                . Hostnames, evidence, and security signals are separate. This is
+                not a security score.
+              </p>
+              {diff.comparability === "not_comparable_scope" ? (
+                <p className="text-sm text-zinc-700">
+                  Scout did not compare surfaces because authorization scope
+                  changed.
+                </p>
+              ) : null}
+              {["surface", "evidence", "security_signal", "coverage"].map(
+                (category) => {
+                  const rows = diff.changes.filter(
+                    (item) => item.category === category,
+                  );
+                  if (rows.length === 0) return null;
+                  const newRows = rows.filter((item) => {
+                    const type = item.change_type;
+                    if (type.includes("unavailable") || type.includes("lost") || type.includes("no_longer")) {
+                      return false;
+                    }
+                    return (
+                      type.includes("new") ||
+                      type.includes("gained") ||
+                      type.includes("newly") ||
+                      type.includes("became_available")
+                    );
+                  });
+                  const goneRows = rows.filter(
+                    (item) =>
+                      item.change_type.includes("no_longer") ||
+                      item.change_type.includes("lost") ||
+                      item.change_type.includes("unavailable"),
+                  );
+                  const changedRows = rows.filter(
+                    (item) =>
+                      !newRows.includes(item) && !goneRows.includes(item),
+                  );
+                  const title =
+                    category === "surface"
+                      ? "Surface"
+                      : category === "evidence"
+                        ? "Evidence"
+                        : category === "security_signal"
+                          ? "Security signals"
+                          : "Coverage";
+                  return (
+                    <div key={category}>
+                      <h5 className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                        {title}
+                      </h5>
+                      <dl className="mt-2 grid gap-2 text-sm text-zinc-700">
+                        <div>
+                          <dt className="text-zinc-500">New</dt>
+                          <dd>
+                            {newRows.length === 0
+                              ? "None"
+                              : newRows.map((item) => item.explanation).join(" ")}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-zinc-500">Changed</dt>
+                          <dd>
+                            {changedRows.length === 0
+                              ? "None"
+                              : changedRows
+                                  .map((item) => item.explanation)
+                                  .join(" ")}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-zinc-500">No longer observed</dt>
+                          <dd>
+                            {goneRows.length === 0
+                              ? "None"
+                              : goneRows.map((item) => item.explanation).join(" ")}
+                          </dd>
+                        </div>
+                      </dl>
+                    </div>
+                  );
+                },
+              )}
+              {diff.changes.some((item) => item.significance === "regression") ? (
+                <div>
+                  <h5 className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                    Security-significant regressions
+                  </h5>
+                  <ul className="mt-2 list-disc pl-5 text-sm text-zinc-700">
+                    {diff.changes
+                      .filter((item) => item.significance === "regression")
+                      .map((item) => (
+                        <li key={`${item.change_type}-${item.match_key}`}>
+                          {item.explanation}
+                        </li>
+                      ))}
+                  </ul>
+                </div>
+              ) : null}
+              {diff.follow_up_findings.length > 0 ? (
+                <p className="text-xs text-zinc-500">
+                  Finding updates after this snapshot:{" "}
+                  {diff.follow_up_findings
+                    .map(
+                      (item) =>
+                        `${item.hostname}/${item.candidate_type} ${item.change_type}`,
+                    )
+                    .join("; ")}
+                  . These do not rewrite frozen changes.
+                </p>
+              ) : null}
             </div>
           ) : null}
 
