@@ -12,6 +12,7 @@ from app.services.alerts import (
     dismiss_alert,
     get_alert_or_404,
     list_alerts_for_user,
+    load_public_deliveries,
     mark_alert_read,
     serialize_alert,
     serialize_alert_for_user,
@@ -20,11 +21,15 @@ from app.services.alerts import (
 router = APIRouter(prefix="/v1/alerts", tags=["alerts"])
 
 
-def _to_response(row) -> AlertResponse:
+def _to_response(row, deliveries) -> AlertResponse:
     alert, episode, state, domain = row
     return AlertResponse.model_validate(
         serialize_alert(
-            alert=alert, episode=episode, state=state, target_domain=domain
+            alert=alert,
+            episode=episode,
+            state=state,
+            target_domain=domain,
+            deliveries=deliveries,
         )
     )
 
@@ -46,7 +51,8 @@ def list_alerts_endpoint(
         unread=unread,
         include_dismissed=include_dismissed,
     )
-    return [_to_response(row) for row in rows]
+    deliveries = load_public_deliveries(db, alert_ids=[item[0].id for item in rows])
+    return [_to_response(row, deliveries.get(row[0].id, [])) for row in rows]
 
 
 @router.get("/summary", response_model=AlertSummaryResponse)

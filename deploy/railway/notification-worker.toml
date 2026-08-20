@@ -1,0 +1,14 @@
+# Railway service config reference for the Scout notification worker.
+# Root Directory = apps/api. Same Dockerfile as API; different start command.
+# Do NOT set a releaseCommand here (migrations belong on the API service only).
+# Do not enable EMAIL_DELIVERY_ENABLED until provider config is reviewed.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+watchPatterns = ["**"]
+
+[deploy]
+startCommand = "/app/.venv/bin/python -m app.notification_worker"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10

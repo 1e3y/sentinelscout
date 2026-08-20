@@ -1,14 +1,15 @@
-# Shared image for Scout API, worker, and scheduler (Railway).
+# Shared image for Scout API, worker, notification worker, and scheduler (Railway).
 # Different services override the start command; migrations are NOT run here.
 #
 # Build (from apps/api):
 #   docker build -t scout-api:local .
 #
 # Start examples:
-#   API:       uv run uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
-#   Worker:    uv run python -m app.worker
-#   Scheduler: uv run python -m app.scheduler
-#   Migrate:   uv run alembic upgrade head
+#   API:                  uv run uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+#   Worker:               uv run python -m app.worker
+#   Notification worker:  uv run python -m app.notification_worker
+#   Scheduler:            uv run python -m app.scheduler
+#   Migrate:              uv run alembic upgrade head
 
 FROM python:3.12-slim-bookworm
 

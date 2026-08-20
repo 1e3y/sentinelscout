@@ -45,8 +45,10 @@ ALERT_TYPES = frozenset(
     }
 )
 EPISODE_STATUSES = frozenset({"open", "closed"})
-OUTBOX_CHANNELS = frozenset({"in_app"})
-OUTBOX_STATUSES = frozenset({"pending", "delivered", "failed", "skipped"})
+OUTBOX_CHANNELS = frozenset({"in_app", "email"})
+OUTBOX_STATUSES = frozenset(
+    {"pending", "processing", "delivered", "failed", "dead", "skipped"}
+)
 
 
 class AlertEpisode(Base):
@@ -256,7 +258,7 @@ class AlertUserState(Base):
 
 
 class NotificationOutbox(Base):
-    """Transactional outbox. M19 writes in_app/org as delivered; no external providers."""
+    """Transactional outbox. in_app is insert-as-delivered; email is pending until the worker."""
 
     __tablename__ = "notification_outbox"
     __table_args__ = (
@@ -267,12 +269,22 @@ class NotificationOutbox(Base):
             name="uq_notification_outbox_destination",
         ),
         CheckConstraint(
-            "channel IN ('in_app')",
+            "channel IN ('in_app', 'email')",
             name="ck_notification_outbox_channel",
         ),
         CheckConstraint(
-            "status IN ('pending', 'delivered', 'failed', 'skipped')",
+            "status IN ('pending', 'processing', 'delivered', 'failed', 'dead', 'skipped')",
             name="ck_notification_outbox_status",
+        ),
+        Index(
+            "ix_notification_outbox_email_due",
+            "available_at",
+            postgresql_where=text("channel = 'email' AND status IN ('pending', 'failed')"),
+        ),
+        Index(
+            "ix_notification_outbox_email_lease",
+            "lease_expires_at",
+            postgresql_where=text("channel = 'email' AND status = 'processing'"),
         ),
     )
 
@@ -293,8 +305,21 @@ class NotificationOutbox(Base):
     destination_key: Mapped[str] = mapped_column(String(256), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    delivery_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    recipient_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    processing_token: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     available_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

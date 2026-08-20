@@ -57,6 +57,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         action="store_true",
         help="Also compare Fixture C (not part of the default CI pack)",
     )
+    compare.add_argument(
+        "--include-monitoring-alerts",
+        action="store_true",
+        help="Also compare monitoring-alerts (not part of the default CI pack)",
+    )
     compare.add_argument("--json", action="store_true", help="Print JSON only")
 
     serve = sub.add_parser("serve", help="Serve fixture HTML on loopback (optional local parity)")
@@ -103,11 +108,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
 
 def _cmd_compare(args: argparse.Namespace) -> int:
-    fixture_ids = (
-        DEFAULT_CI_FIXTURES + ("retest-delta",)
-        if args.include_retest_delta
-        else DEFAULT_CI_FIXTURES
-    )
+    fixture_ids = list(DEFAULT_CI_FIXTURES)
+    if args.include_retest_delta:
+        fixture_ids.append("retest-delta")
+    if args.include_monitoring_alerts:
+        fixture_ids.append("monitoring-alerts")
     pack = compare_pack(
         results_dir=Path(args.results),
         baselines_dir=Path(args.against),

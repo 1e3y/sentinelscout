@@ -13,11 +13,13 @@ def upsert_user(db: Session, info: ClerkUserInfo) -> User:
         user = User(
             clerk_user_id=info.clerk_user_id,
             email=info.email,
+            email_verified=bool(info.email_verified),
             name=info.name,
         )
         db.add(user)
     else:
         user.email = info.email
+        user.email_verified = bool(info.email_verified)
         user.name = info.name
     db.flush()
     return user

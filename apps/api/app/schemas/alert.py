@@ -9,6 +9,17 @@ DISCLAIMER = (
 )
 
 
+class AlertDeliveryStatusResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    channel: str
+    destination_key: str
+    status: str
+    attempt_count: int = 0
+    delivered_at: datetime | str | None = None
+    last_error_code: str | None = None
+
+
 class AlertResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -34,6 +45,7 @@ class AlertResponse(BaseModel):
     acknowledged_by_user_id: str | None = None
     read_at: datetime | str | None = None
     dismissed_at: datetime | str | None = None
+    deliveries: list[AlertDeliveryStatusResponse] = Field(default_factory=list)
     disclaimer: str = DISCLAIMER
 
 

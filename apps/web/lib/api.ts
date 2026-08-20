@@ -613,6 +613,15 @@ export function fetchFindings(token: string): Promise<FindingResponse[]> {
   return apiFetch<FindingResponse[]>("/v1/findings", token);
 }
 
+export type AlertDeliveryStatus = {
+  channel: string;
+  destination_key: string;
+  status: string;
+  attempt_count: number;
+  delivered_at: string | null;
+  last_error_code: string | null;
+};
+
 export type AlertResponse = {
   id: string;
   organization_id: string;
@@ -636,6 +645,7 @@ export type AlertResponse = {
   acknowledged_by_user_id: string | null;
   read_at: string | null;
   dismissed_at: string | null;
+  deliveries: AlertDeliveryStatus[];
   disclaimer: string;
 };
 
@@ -694,6 +704,50 @@ export function dismissAlert(token: string, alertId: string): Promise<AlertRespo
   return apiFetch<AlertResponse>(`/v1/alerts/${alertId}/dismiss`, token, {
     method: "POST",
   });
+}
+
+export type NotificationMember = {
+  user_id: string;
+  name: string | null;
+  email: string;
+  email_verified: boolean;
+};
+
+export type NotificationSettingsResponse = {
+  organization_id: string;
+  email_enabled: boolean;
+  email_min_priority: string;
+  recipients: NotificationMember[];
+  members: NotificationMember[];
+  can_manage: boolean;
+};
+
+export type NotificationSettingsUpdateRequest = {
+  email_enabled: boolean;
+  email_min_priority: string;
+  recipient_user_ids: string[];
+};
+
+export function fetchNotificationSettings(
+  token: string,
+  orgId: string,
+): Promise<NotificationSettingsResponse> {
+  return apiFetch<NotificationSettingsResponse>(
+    `/v1/organizations/${orgId}/notification-settings`,
+    token,
+  );
+}
+
+export function updateNotificationSettings(
+  token: string,
+  orgId: string,
+  body: NotificationSettingsUpdateRequest,
+): Promise<NotificationSettingsResponse> {
+  return apiFetch<NotificationSettingsResponse>(
+    `/v1/organizations/${orgId}/notification-settings`,
+    token,
+    { method: "PUT", body: JSON.stringify(body) },
+  );
 }
 
 export function fetchFinding(

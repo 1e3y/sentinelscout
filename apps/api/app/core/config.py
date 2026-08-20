@@ -71,7 +71,27 @@ class Settings(BaseSettings):
     rate_limit_operation_create: int = Field(default=30, alias="RATE_LIMIT_OPERATION_CREATE")
     rate_limit_validation: int = Field(default=60, alias="RATE_LIMIT_VALIDATION")
     rate_limit_retest: int = Field(default=30, alias="RATE_LIMIT_RETEST")
+    rate_limit_notification_settings: int = Field(
+        default=30, alias="RATE_LIMIT_NOTIFICATION_SETTINGS"
+    )
     rate_limit_window_seconds: int = Field(default=3600, alias="RATE_LIMIT_WINDOW_SECONDS")
+
+    email_delivery_enabled: bool = Field(default=False, alias="EMAIL_DELIVERY_ENABLED")
+    email_provider: Literal["fake", "resend"] = Field(default="fake", alias="EMAIL_PROVIDER")
+    email_from: str = Field(default="", alias="EMAIL_FROM")
+    email_api_key: str = Field(default="", alias="EMAIL_API_KEY")
+    email_staging_allowlist: str = Field(default="", alias="EMAIL_STAGING_ALLOWLIST")
+    notification_worker_poll_interval: float = Field(
+        default=2.0,
+        validation_alias=AliasChoices(
+            "NOTIFICATION_WORKER_POLL_INTERVAL",
+            "NOTIFICATION_WORKER_POLL_INTERVAL_SECONDS",
+        ),
+    )
+    notification_lease_seconds: int = Field(default=300, alias="NOTIFICATION_LEASE_SECONDS")
+    notification_provider_timeout_seconds: int = Field(
+        default=15, alias="NOTIFICATION_PROVIDER_TIMEOUT_SECONDS"
+    )
 
     @field_validator("environment", mode="before")
     @classmethod
@@ -96,6 +116,13 @@ class Settings(BaseSettings):
                 return "postgresql+psycopg://" + value[len("postgres://") :]
             if value.startswith("postgresql://"):
                 return "postgresql+psycopg://" + value[len("postgresql://") :]
+        return value
+
+    @field_validator("email_provider", mode="before")
+    @classmethod
+    def _normalize_email_provider(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip().lower()
         return value
 
     @model_validator(mode="after")
@@ -180,6 +207,14 @@ class Settings(BaseSettings):
     @property
     def api_cors_origins(self) -> str:
         return self.cors_allowed_origins
+
+    @property
+    def staging_email_allowlist(self) -> set[str]:
+        return {
+            part.strip().lower()
+            for part in self.email_staging_allowlist.split(",")
+            if part.strip()
+        }
 
     @property
     def is_production_like(self) -> bool:

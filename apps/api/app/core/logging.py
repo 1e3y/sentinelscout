@@ -34,6 +34,12 @@ _SENSITIVE_KEY_FRAGMENTS = (
     "response_body",
     "chain_of_thought",
     "set-cookie",
+    "recipient_email",
+    "email_snapshot",
+    "text_body",
+    "subject_snapshot",
+    "from_email",
+    "delivery_snapshot",
 )
 
 _BEARER_RE = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9\-._~+/]+=*")

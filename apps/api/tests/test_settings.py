@@ -47,6 +47,8 @@ def test_development_allows_localhost_defaults(monkeypatch):
     settings = Settings()
     assert "localhost" in settings.database_url
     assert settings.frontend_url.startswith("http://localhost")
+    assert settings.email_delivery_enabled is False
+    assert settings.email_provider == "fake"
 
 
 def test_database_url_normalizes_railway_style(monkeypatch):

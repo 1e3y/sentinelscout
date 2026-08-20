@@ -6,6 +6,7 @@ import { AlertsPanel } from "./alerts-panel";
 import { AuditPanel } from "./audit-panel";
 import { FindingsPanel } from "./findings-panel";
 import { MonitoringPanel } from "./monitoring-panel";
+import { NotificationSettingsPanel } from "./notification-settings-panel";
 import { OperationsPanel } from "./operations-panel";
 import { TargetsPanel } from "./targets-panel";
 
@@ -98,6 +99,7 @@ export default async function DashboardPage() {
           <TargetsPanel enabled={Boolean(activeOrg)} />
           <MonitoringPanel enabled={Boolean(activeOrg)} />
           <AlertsPanel enabled={Boolean(activeOrg)} />
+          <NotificationSettingsPanel enabled={Boolean(activeOrg)} />
           <OperationsPanel enabled={Boolean(activeOrg)} />
           <FindingsPanel enabled={Boolean(activeOrg)} />
           <AuditPanel enabled={Boolean(activeOrg)} />

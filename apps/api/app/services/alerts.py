@@ -28,6 +28,7 @@ from app.services.coverage import (
     REASON_PROBE_NO_RESULT,
     TERMINAL_STATUSES,
 )
+from app.services.notification_runtime import enqueue_email_outbox
 from app.services.diff import (
     CHANGE_CAPABILITY,
     CHANGE_CANDIDATE_GONE,
@@ -659,6 +660,7 @@ def _insert_outbox(db: Session, alert: Alert) -> None:
             constraint="uq_notification_outbox_destination"
         )
     )
+    enqueue_email_outbox(db, alert)
 
 
 def freeze_operation_alerts(
@@ -1070,6 +1072,35 @@ def acknowledge_alert(db: Session, *, alert: Alert, user_id: UUID) -> Alert:
     return alert
 
 
+def public_outbox_status(row: NotificationOutbox) -> dict[str, Any]:
+    return {
+        "channel": row.channel,
+        "destination_key": row.destination_key,
+        "status": row.status,
+        "attempt_count": int(row.attempt_count or 0),
+        "delivered_at": _iso(row.delivered_at),
+        "last_error_code": row.last_error_code,
+    }
+
+
+def load_public_deliveries(
+    db: Session, *, alert_ids: list[UUID]
+) -> dict[UUID, list[dict[str, Any]]]:
+    if not alert_ids:
+        return {}
+    rows = list(
+        db.scalars(
+            select(NotificationOutbox)
+            .where(NotificationOutbox.alert_id.in_(alert_ids))
+            .order_by(NotificationOutbox.created_at.asc())
+        ).all()
+    )
+    grouped: dict[UUID, list[dict[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault(row.alert_id, []).append(public_outbox_status(row))
+    return grouped
+
+
 def serialize_alert_for_user(db: Session, *, alert: Alert, user_id: UUID) -> dict[str, Any]:
     episode = db.get(AlertEpisode, alert.episode_id)
     state = db.scalar(
@@ -1079,11 +1110,13 @@ def serialize_alert_for_user(db: Session, *, alert: Alert, user_id: UUID) -> dic
         )
     )
     target = db.get(AuthorizedTarget, alert.target_id)
+    deliveries = load_public_deliveries(db, alert_ids=[alert.id]).get(alert.id, [])
     return serialize_alert(
         alert=alert,
         episode=episode,
         state=state,
         target_domain=target.domain if target is not None else None,
+        deliveries=deliveries,
     )
 
 
@@ -1093,6 +1126,7 @@ def serialize_alert(
     episode: AlertEpisode | None,
     state: AlertUserState | None,
     target_domain: str | None,
+    deliveries: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
         "id": str(alert.id),
@@ -1125,5 +1159,6 @@ def serialize_alert(
         ),
         "read_at": _iso(state.read_at) if state is not None else None,
         "dismissed_at": _iso(state.dismissed_at) if state is not None else None,
+        "deliveries": list(deliveries or []),
         "disclaimer": DISCLAIMER,
     }

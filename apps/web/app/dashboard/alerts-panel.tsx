@@ -210,6 +210,22 @@ export function AlertsPanel({ enabled }: Props) {
                       <dd>{formatTime(selected.created_at)}</dd>
                     </div>
                     <div>
+                      <dt className="text-zinc-500">Delivery</dt>
+                      <dd>
+                        {(selected.deliveries ?? []).length === 0
+                          ? "In-app only"
+                          : selected.deliveries.map((item) => (
+                              <div key={`${item.channel}:${item.destination_key}`}>
+                                {item.channel === "email" ? "Email" : "In-app"}:{" "}
+                                {item.status}
+                                {item.last_error_code
+                                  ? ` (${item.last_error_code})`
+                                  : ""}
+                              </div>
+                            ))}
+                      </dd>
+                    </div>
+                    <div>
                       <dt className="text-zinc-500">Acknowledged</dt>
                       <dd>
                         {selected.acknowledged_at

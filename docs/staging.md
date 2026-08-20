@@ -13,6 +13,7 @@ Do **not** auto-run Alembic on every API process start. Migrations run explicitl
 | Postgres | Railway Plugin | managed | Railway-managed |
 | API | Railway service | `apps/api` Dockerfile | `uvicorn app.main:app` |
 | Worker | Railway service | same Dockerfile | `python -m app.worker` |
+| Notification worker | Railway service | same Dockerfile | `python -m app.notification_worker` |
 | Scheduler | Railway service | same Dockerfile | `python -m app.scheduler` |
 | Web | Vercel project | `apps/web` | Next.js (`pnpm build` / Vercel runtime) |
 
@@ -20,6 +21,7 @@ Reference configs:
 
 - `deploy/railway/api.toml`
 - `deploy/railway/worker.toml`
+- `deploy/railway/notification-worker.toml`
 - `deploy/railway/scheduler.toml`
 - `apps/api/Dockerfile`
 - `apps/web/vercel.json`
@@ -43,7 +45,7 @@ Reference configs:
 
 1. Create a Railway project (e.g. `sentinelscout-staging`).
 2. Add **PostgreSQL** plugin → copy/`DATABASE_URL` reference for other services.
-3. Create three services from the same GitHub repo, each with **Root Directory = `apps/api`**:
+3. Create four services from the same GitHub repo, each with **Root Directory = `apps/api`**:
 
 #### API service
 
@@ -60,6 +62,17 @@ Reference configs:
 - **Start command:** `/app/.venv/bin/python -m app.worker`
 - **No** release command
 - Variables from `deploy/env/railway-worker.env.example`
+- Restart on failure enabled
+
+#### Notification worker service
+
+- Same Dockerfile / root directory
+- **Start command:** `/app/.venv/bin/python -m app.notification_worker`
+- **No** release command
+- Variables from `deploy/env/railway-notification-worker.env.example`
+- Keep `EMAIL_DELIVERY_ENABLED=false` until provider configuration is reviewed
+- Do **not** create a real Resend API key for this milestone
+- Staging delivery, when later enabled, requires `EMAIL_STAGING_ALLOWLIST` and valid Resend/`EMAIL_FROM` configuration. Missing allowlist or provider config fails worker readiness and makes **zero** provider calls; queued destinations outside the allowlist are `skipped` (`staging_destination_not_allowed`), not dead-lettered
 - Restart on failure enabled
 
 #### Scheduler service
@@ -84,7 +97,7 @@ Reference configs:
 
 1. Postgres ready on Railway  
 2. Deploy API (release runs migrations) → note API URL  
-3. Deploy worker + scheduler (same `DATABASE_URL`)  
+3. Deploy worker + scheduler + notification worker (same `DATABASE_URL`)  
 4. Deploy Vercel web with `NEXT_PUBLIC_API_BASE_URL=<API URL>`  
 5. Patch CORS / FRONTEND_URL / Clerk parties to the Vercel URL  
 6. Redeploy API if CORS/FRONTEND_URL changed  
@@ -141,6 +154,23 @@ Same as API for DB + Clerk/settings validation fields that Settings requires in 
 
 Start: `/app/.venv/bin/python -m app.worker`  
 Restart policy: on failure (persistent process).
+
+### Railway notification worker
+
+Same staging Settings requirements as API, plus:
+
+| Variable | Required | Notes |
+|---|---|---|
+| `EMAIL_DELIVERY_ENABLED` | no | default `false`. Pause switch: pending rows stay pending |
+| `EMAIL_PROVIDER` | no | `resend` for staging/production when delivery is on |
+| `EMAIL_FROM` | for delivery | frozen into outbox rows by the discovery worker/API at enqueue time; also required for notification-worker readiness |
+| `EMAIL_API_KEY` | for delivery | Resend secret. Do not create one for M20 rollout |
+| `EMAIL_STAGING_ALLOWLIST` | when staging delivery is on | comma-separated emails; missing → fail readiness |
+| `NOTIFICATION_WORKER_POLL_INTERVAL` | no | `2` |
+
+Start: `/app/.venv/bin/python -m app.notification_worker`
+
+Delivery guarantee: one Scout outbox row per Alert/destination, local workers fenced, retries reuse `Idempotency-Key = str(outbox.id)` and the frozen payload. Resend retains keys for about 24 hours, so this is **not** exactly-once external delivery after that window.
 
 ### Railway scheduler
 
@@ -207,6 +237,7 @@ docker build -t scout-api:local .
 # Run shapes (do not use real secrets in shell history carelessly)
 docker run --rm -e PORT=8000 -e ENVIRONMENT=staging … scout-api:local
 docker run --rm … scout-api:local uv run python -m app.worker
+docker run --rm … scout-api:local uv run python -m app.notification_worker
 docker run --rm … scout-api:local uv run python -m app.scheduler
 docker run --rm -e DATABASE_URL=… scout-api:local uv run alembic upgrade head
 ```

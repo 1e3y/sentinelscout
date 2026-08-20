@@ -12,6 +12,10 @@ from app.models.coverage import OperationCoverageSummary
 from app.models.diff import OperationDiffSummary
 from app.models.finding import Finding
 from app.models.monitoring import MonitoringConfiguration
+from app.models.notification import (
+    OrganizationEmailRecipient,
+    OrganizationNotificationSettings,
+)
 from app.models.operation import Operation, OperationEvent
 from app.models.operation_controls import OperationControlSnapshot
 from app.models.organization import Organization, OrganizationMembership
@@ -47,4 +51,6 @@ __all__ = [
     "AlertUserState",
     "NotificationOutbox",
     "AlertGenerationReceipt",
+    "OrganizationNotificationSettings",
+    "OrganizationEmailRecipient",
 ]

@@ -69,6 +69,10 @@ def get_auth_context(
             # Active org from JWT without persisted membership is ignored.
             if active_membership is None:
                 active_organization = None
+            elif identity.active_org_role and active_membership.role != identity.active_org_role:
+                active_membership.role = identity.active_org_role
+                db.commit()
+                db.refresh(active_membership)
 
     return AuthContext(
         identity=identity,
@@ -76,6 +80,39 @@ def get_auth_context(
         active_organization=active_organization,
         active_membership=active_membership,
     )
+
+
+def verified_org_admin_role(auth: AuthContext, organization: Organization) -> bool:
+    """True only when the verified JWT org-role for this org is org:admin."""
+    token_org = auth.identity.active_org_id
+    token_role = auth.identity.active_org_role
+    return (
+        bool(token_org)
+        and token_org == organization.clerk_org_id
+        and token_role == "org:admin"
+    )
+
+
+def require_org_admin(
+    org_id: UUID,
+    auth: AuthContext,
+    db: Session,
+) -> tuple[Organization, OrganizationMembership]:
+    organization, membership = require_org_membership(org_id, auth, db)
+    token_org = auth.identity.active_org_id
+    token_role = auth.identity.active_org_role
+    if not token_org or token_org != organization.clerk_org_id or not token_role:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Verified organization role is required",
+        )
+    if token_role != "org:admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Organization admin required",
+        )
+    membership.role = token_role
+    return organization, membership
 
 
 def require_org_membership(

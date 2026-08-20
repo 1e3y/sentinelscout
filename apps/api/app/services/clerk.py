@@ -14,6 +14,7 @@ class ClerkUserInfo:
     clerk_user_id: str
     email: str
     name: str | None
+    email_verified: bool = False
 
 
 @dataclass(frozen=True)
@@ -63,9 +64,14 @@ class HttpClerkDirectory:
                 detail="Failed to fetch user from Clerk",
             )
         data = response.json()
-        email = _primary_email(data)
+        email, email_verified = primary_email_info(data)
         name = _display_name(data)
-        return ClerkUserInfo(clerk_user_id=clerk_user_id, email=email, name=name)
+        return ClerkUserInfo(
+            clerk_user_id=clerk_user_id,
+            email=email,
+            name=name,
+            email_verified=email_verified,
+        )
 
     def list_organization_memberships(self, clerk_user_id: str) -> list[ClerkOrgMembership]:
         if not self._settings.clerk_secret_key:
@@ -101,19 +107,36 @@ class HttpClerkDirectory:
         return memberships
 
 
-def _primary_email(data: dict) -> str:
+def primary_email_info(data: dict) -> tuple[str, bool]:
+    """Return (email, verified). Unverified unless Clerk status is explicitly verified."""
     addresses = data.get("email_addresses") or []
     primary_id = data.get("primary_email_address_id")
+    chosen: dict | None = None
     for addr in addresses:
         if addr.get("id") == primary_id and addr.get("email_address"):
-            return addr["email_address"]
-    for addr in addresses:
-        if addr.get("email_address"):
-            return addr["email_address"]
-    raise HTTPException(
-        status_code=status.HTTP_502_BAD_GATEWAY,
-        detail="Clerk user has no email address",
-    )
+            chosen = addr
+            break
+    if chosen is None:
+        for addr in addresses:
+            if addr.get("email_address"):
+                chosen = addr
+                break
+    if chosen is None:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Clerk user has no email address",
+        )
+    return str(chosen["email_address"]), _email_is_verified(chosen)
+
+
+def _email_is_verified(addr: dict) -> bool:
+    verification = addr.get("verification")
+    if isinstance(verification, dict):
+        status_value = verification.get("status")
+        if isinstance(status_value, str) and status_value.strip().lower() == "verified":
+            return True
+        return False
+    return False
 
 
 def _display_name(data: dict) -> str | None:

@@ -754,8 +754,9 @@ def _score_alerts_case(
             episode_errors.append(f"missing_closed:{alert_type}|{hostname or '-'}")
 
     receipt_ok = receipt is not None and int(receipt.alert_count) == len(alerts)
-    outbox_ok = len(outbox_rows) == len(alerts) and all(
-        row.channel == "in_app" and row.destination_key == "org" for row in outbox_rows
+    in_app_rows = [row for row in outbox_rows if row.channel == "in_app"]
+    outbox_ok = len(in_app_rows) == len(alerts) and all(
+        row.destination_key == "org" for row in in_app_rows
     )
     overall = (
         not missing

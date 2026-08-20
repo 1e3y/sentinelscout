@@ -171,6 +171,7 @@ def seed_user_a(fake_clerk) -> tuple[str, str]:
         clerk_user_id=user_id,
         email="alice@example.com",
         name="Alice",
+        email_verified=True,
     )
     fake_clerk.memberships[user_id] = [
         ClerkOrgMembership(clerk_org_id=org_id, org_name="Org A", role="org:admin")
@@ -186,6 +187,7 @@ def seed_user_b(fake_clerk) -> tuple[str, str]:
         clerk_user_id=user_id,
         email="bob@example.com",
         name="Bob",
+        email_verified=True,
     )
     fake_clerk.memberships[user_id] = [
         ClerkOrgMembership(clerk_org_id=org_id, org_name="Org B", role="org:member")
