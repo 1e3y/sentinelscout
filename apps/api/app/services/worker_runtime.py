@@ -25,6 +25,7 @@ from app.models.operation import Operation
 from app.services.audit import record_audit
 from app.services.candidate_engine import generate_candidates_for_operation
 from app.services.coverage import freeze_operation_coverage
+from app.services.alerts import freeze_operation_alerts
 from app.services.diff import freeze_operation_diff
 from app.services.discovery.execute import (
     AuthorizationExecutionError,
@@ -97,6 +98,7 @@ def _reload(db: Session, operation_id: UUID) -> Operation:
 def _freeze_terminal(db: Session, operation: Operation, *, source: str = "frozen") -> None:
     freeze_operation_coverage(db, operation, source=source, actor_type="worker")
     freeze_operation_diff(db, operation, source=source, actor_type="worker")
+    freeze_operation_alerts(db, operation, source=source, actor_type="worker")
 
 
 def _mark_stopped(db: Session, operation: Operation, *, summary: str) -> Operation:

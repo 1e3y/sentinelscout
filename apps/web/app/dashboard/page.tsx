@@ -2,6 +2,7 @@ import { OrganizationSwitcher, UserButton } from "@clerk/nextjs";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { fetchMe, fetchOrganizations } from "@/lib/api";
+import { AlertsPanel } from "./alerts-panel";
 import { AuditPanel } from "./audit-panel";
 import { FindingsPanel } from "./findings-panel";
 import { MonitoringPanel } from "./monitoring-panel";
@@ -96,6 +97,7 @@ export default async function DashboardPage() {
 
           <TargetsPanel enabled={Boolean(activeOrg)} />
           <MonitoringPanel enabled={Boolean(activeOrg)} />
+          <AlertsPanel enabled={Boolean(activeOrg)} />
           <OperationsPanel enabled={Boolean(activeOrg)} />
           <FindingsPanel enabled={Boolean(activeOrg)} />
           <AuditPanel enabled={Boolean(activeOrg)} />

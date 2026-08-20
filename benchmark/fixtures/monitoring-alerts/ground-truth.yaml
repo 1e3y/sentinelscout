@@ -1,0 +1,454 @@
+schema_version: 1
+fixture_id: monitoring-alerts
+scope:
+  root: alerts.bench.example
+  include_subdomains: true
+  exclusions: []
+default_response_headers:
+  Strict-Transport-Security: max-age=31536000
+sites:
+  - hostname: alerts.bench.example
+    path: /
+    html: headers-ok.bench.example/index.html
+  - hostname: hsts.alerts.bench.example
+    path: /
+    html: headers-ok.bench.example/index.html
+  - hostname: headers.alerts.bench.example
+    path: /
+    html: headers-ok.bench.example/index.html
+  - hostname: title.alerts.bench.example
+    path: /
+    html: headers-ok.bench.example/index.html
+  - hostname: silent.alerts.bench.example
+    path: /
+    html: headers-ok.bench.example/index.html
+  - hostname: down.alerts.bench.example
+    path: /
+    html: headers-ok.bench.example/index.html
+  - hostname: cov-a.alerts.bench.example
+    path: /
+    html: headers-ok.bench.example/index.html
+  - hostname: cov-b.alerts.bench.example
+    path: /
+    html: headers-ok.bench.example/index.html
+  - hostname: cov-c.alerts.bench.example
+    path: /
+    html: headers-ok.bench.example/index.html
+  - hostname: cov-d.alerts.bench.example
+    path: /
+    html: headers-ok.bench.example/index.html
+  - hostname: added.alerts.bench.example
+    path: /
+    html: headers-ok.bench.example/index.html
+  - hostname: admin.alerts.bench.example
+    path: /
+    html: headers-ok.bench.example/index.html
+assets:
+  - hostname: alerts.bench.example
+    reachable: true
+  - hostname: hsts.alerts.bench.example
+    reachable: true
+  - hostname: headers.alerts.bench.example
+    reachable: true
+  - hostname: title.alerts.bench.example
+    reachable: true
+  - hostname: silent.alerts.bench.example
+    reachable: true
+  - hostname: down.alerts.bench.example
+    reachable: true
+  - hostname: cov-a.alerts.bench.example
+    reachable: true
+  - hostname: cov-b.alerts.bench.example
+    reachable: true
+  - hostname: cov-c.alerts.bench.example
+    reachable: true
+  - hostname: cov-d.alerts.bench.example
+    reachable: true
+  - hostname: added.alerts.bench.example
+    reachable: true
+  - hostname: admin.alerts.bench.example
+    reachable: true
+candidates:
+  - id: admin-new
+    hostname: admin.alerts.bench.example
+    candidate_type: exposed_admin_interface
+    expected: present
+    desirable: true
+  - id: hsts-missing
+    hostname: hsts.alerts.bench.example
+    candidate_type: security_header_observation
+    expected: present
+    desirable: true
+not_candidates: []
+overlaps: []
+known_misses: []
+retest: []
+alerts:
+  baseline_hosts: &baseline_hosts
+    - alerts.bench.example
+    - hsts.alerts.bench.example
+    - headers.alerts.bench.example
+    - title.alerts.bench.example
+    - silent.alerts.bench.example
+    - down.alerts.bench.example
+    - cov-a.alerts.bench.example
+    - cov-b.alerts.bench.example
+    - cov-c.alerts.bench.example
+    - cov-d.alerts.bench.example
+  expanded_hosts: &expanded_hosts
+    - alerts.bench.example
+    - hsts.alerts.bench.example
+    - headers.alerts.bench.example
+    - title.alerts.bench.example
+    - silent.alerts.bench.example
+    - down.alerts.bench.example
+    - cov-a.alerts.bench.example
+    - cov-b.alerts.bench.example
+    - cov-c.alerts.bench.example
+    - cov-d.alerts.bench.example
+    - added.alerts.bench.example
+    - admin.alerts.bench.example
+  hsts_absent: &hsts_absent
+    hsts.alerts.bench.example:
+      headers:
+        content-type: text/html
+      headers_present:
+        - content-type
+      headers_observed: true
+      content_type: text/html
+      scheme: https
+      redirected: false
+      status_code: 200
+  silent_only: &silent_only
+    silent.alerts.bench.example: no_result
+  runs:
+    - id: run1
+      hosts: *baseline_hosts
+      probe_outcomes: *silent_only
+      probe_overrides:
+        title.alerts.bench.example:
+          title: Alpha
+      expect:
+        new_alert_count: 0
+        new_alerts: []
+        forbid_alert_types:
+          - hsts_lost
+          - header_evidence_lost
+          - resolved_condition_reappeared
+    - id: run2
+      hosts: *baseline_hosts
+      probe_outcomes: *silent_only
+      probe_overrides:
+        <<: *hsts_absent
+        title.alerts.bench.example:
+          title: Alpha
+      expect:
+        new_alert_count: 1
+        new_alerts:
+          - alert_type: hsts_lost
+            hostname: hsts.alerts.bench.example
+            category: security_regression
+            priority: medium
+        open_episodes:
+          - alert_type: hsts_lost
+            hostname: hsts.alerts.bench.example
+            last_seen_advanced: true
+            reopened_from_previous: false
+    - id: run3
+      hosts: *baseline_hosts
+      probe_outcomes: *silent_only
+      probe_overrides:
+        <<: *hsts_absent
+        title.alerts.bench.example:
+          title: Alpha
+      expect:
+        new_alert_count: 0
+        new_alerts: []
+        open_episodes:
+          - alert_type: hsts_lost
+            hostname: hsts.alerts.bench.example
+            last_seen_advanced: true
+    - id: run4
+      hosts: *baseline_hosts
+      probe_outcomes: *silent_only
+      probe_overrides:
+        title.alerts.bench.example:
+          title: Alpha
+      expect:
+        new_alert_count: 0
+        new_alerts: []
+        closed_episodes:
+          - alert_type: hsts_lost
+            hostname: hsts.alerts.bench.example
+    - id: run5
+      hosts: *baseline_hosts
+      probe_outcomes: *silent_only
+      probe_overrides:
+        <<: *hsts_absent
+        title.alerts.bench.example:
+          title: Alpha
+      expect:
+        new_alert_count: 1
+        new_alerts:
+          - alert_type: hsts_lost
+            hostname: hsts.alerts.bench.example
+            category: security_regression
+            priority: medium
+        open_episodes:
+          - alert_type: hsts_lost
+            hostname: hsts.alerts.bench.example
+            last_seen_advanced: true
+            reopened_from_previous: true
+    - id: run_title
+      hosts: *baseline_hosts
+      probe_outcomes: *silent_only
+      probe_overrides:
+        <<: *hsts_absent
+        title.alerts.bench.example:
+          title: Beta
+      expect:
+        new_alert_count: 0
+        new_alerts: []
+        open_episodes:
+          - alert_type: hsts_lost
+            hostname: hsts.alerts.bench.example
+            last_seen_advanced: true
+    - id: run_cov_degrade
+      hosts: *baseline_hosts
+      probe_outcomes:
+        silent.alerts.bench.example: no_result
+        cov-a.alerts.bench.example: no_result
+        cov-b.alerts.bench.example: no_result
+      probe_overrides:
+        <<: *hsts_absent
+        title.alerts.bench.example:
+          title: Beta
+      expect:
+        new_alert_count: 1
+        new_alerts:
+          - alert_type: http_observation_coverage_degraded
+            category: coverage_degradation
+            priority: low
+        open_episodes:
+          - alert_type: http_observation_coverage_degraded
+            last_seen_advanced: true
+          - alert_type: hsts_lost
+            hostname: hsts.alerts.bench.example
+            last_seen_advanced: true
+    - id: run_cov_partial
+      hosts: *baseline_hosts
+      probe_outcomes:
+        silent.alerts.bench.example: no_result
+        cov-a.alerts.bench.example: no_result
+      probe_overrides:
+        <<: *hsts_absent
+        title.alerts.bench.example:
+          title: Beta
+      expect:
+        new_alert_count: 0
+        new_alerts: []
+        open_episodes:
+          - alert_type: http_observation_coverage_degraded
+            last_seen_advanced: true
+          - alert_type: hsts_lost
+            hostname: hsts.alerts.bench.example
+            last_seen_advanced: true
+    - id: run_cov_restore
+      hosts: *baseline_hosts
+      probe_outcomes: *silent_only
+      probe_overrides:
+        <<: *hsts_absent
+        title.alerts.bench.example:
+          title: Beta
+      expect:
+        new_alert_count: 0
+        new_alerts: []
+        closed_episodes:
+          - alert_type: http_observation_coverage_degraded
+        open_episodes:
+          - alert_type: hsts_lost
+            hostname: hsts.alerts.bench.example
+            last_seen_advanced: true
+    - id: run_headers
+      hosts: *baseline_hosts
+      probe_outcomes: *silent_only
+      capture_headers:
+        headers.alerts.bench.example: false
+      probe_overrides:
+        <<: *hsts_absent
+        title.alerts.bench.example:
+          title: Beta
+      expect:
+        new_alert_count: 2
+        new_alerts:
+          - alert_type: header_evidence_lost
+            hostname: headers.alerts.bench.example
+            category: coverage_degradation
+            priority: low
+          - alert_type: header_evidence_coverage_degraded
+            category: coverage_degradation
+            priority: low
+        forbid_categories:
+          - security_regression
+        open_episodes:
+          - alert_type: header_evidence_lost
+            hostname: headers.alerts.bench.example
+            last_seen_advanced: true
+          - alert_type: header_evidence_coverage_degraded
+            last_seen_advanced: true
+          - alert_type: hsts_lost
+            hostname: hsts.alerts.bench.example
+            last_seen_advanced: true
+    - id: run_headers2
+      hosts: *baseline_hosts
+      probe_outcomes: *silent_only
+      capture_headers:
+        headers.alerts.bench.example: false
+      probe_overrides:
+        <<: *hsts_absent
+        title.alerts.bench.example:
+          title: Beta
+      expect:
+        new_alert_count: 0
+        new_alerts: []
+        open_episodes:
+          - alert_type: header_evidence_lost
+            hostname: headers.alerts.bench.example
+            last_seen_advanced: true
+          - alert_type: header_evidence_coverage_degraded
+            last_seen_advanced: true
+          - alert_type: hsts_lost
+            hostname: hsts.alerts.bench.example
+            last_seen_advanced: true
+    - id: run_headers_http_gone
+      hosts: *baseline_hosts
+      probe_outcomes:
+        silent.alerts.bench.example: no_result
+        headers.alerts.bench.example: no_result
+      capture_headers:
+        headers.alerts.bench.example: false
+      probe_overrides:
+        <<: *hsts_absent
+        title.alerts.bench.example:
+          title: Beta
+      expect:
+        new_alert_count: 1
+        new_alerts:
+          - alert_type: http_observation_coverage_degraded
+            category: coverage_degradation
+            priority: low
+        open_episodes:
+          - alert_type: header_evidence_lost
+            hostname: headers.alerts.bench.example
+            last_seen_advanced: false
+          - alert_type: hsts_lost
+            hostname: hsts.alerts.bench.example
+            last_seen_advanced: true
+          - alert_type: http_observation_coverage_degraded
+            last_seen_advanced: true
+        closed_episodes:
+          - alert_type: header_evidence_coverage_degraded
+    - id: run_added
+      hosts: *expanded_hosts
+      probe_outcomes:
+        silent.alerts.bench.example: no_result
+        headers.alerts.bench.example: no_result
+      capture_headers:
+        headers.alerts.bench.example: false
+      probe_overrides:
+        <<: *hsts_absent
+        title.alerts.bench.example:
+          title: Beta
+      expect:
+        new_alert_count: 0
+        new_alerts: []
+        forbid_alert_types:
+          - resolved_condition_reappeared
+        open_episodes:
+          - alert_type: hsts_lost
+            hostname: hsts.alerts.bench.example
+            last_seen_advanced: true
+    - id: run_down
+      hosts: *expanded_hosts
+      probe_outcomes:
+        silent.alerts.bench.example: no_result
+        headers.alerts.bench.example: no_result
+        down.alerts.bench.example: host_not_reachable
+      capture_headers:
+        headers.alerts.bench.example: false
+      probe_overrides:
+        <<: *hsts_absent
+        title.alerts.bench.example:
+          title: Beta
+      expect:
+        new_alert_count: 1
+        new_alerts:
+          - alert_type: http_observation_lost_explicit
+            hostname: down.alerts.bench.example
+            category: coverage_degradation
+            priority: info
+        open_episodes:
+          - alert_type: http_observation_lost_explicit
+            hostname: down.alerts.bench.example
+            last_seen_advanced: true
+          - alert_type: http_observation_coverage_degraded
+            last_seen_advanced: true
+          - alert_type: hsts_lost
+            hostname: hsts.alerts.bench.example
+            last_seen_advanced: true
+    - id: run_scope
+      hosts: *expanded_hosts
+      exclusions:
+        - cov-d.alerts.bench.example
+      probe_outcomes:
+        silent.alerts.bench.example: no_result
+        headers.alerts.bench.example: no_result
+        down.alerts.bench.example: host_not_reachable
+      capture_headers:
+        headers.alerts.bench.example: false
+      probe_overrides:
+        <<: *hsts_absent
+        title.alerts.bench.example:
+          title: Beta
+      expect:
+        new_alert_count: 1
+        new_alerts:
+          - alert_type: scope_not_comparable
+            category: informational
+            priority: info
+        open_episodes:
+          - alert_type: hsts_lost
+            hostname: hsts.alerts.bench.example
+            last_seen_advanced: false
+          - alert_type: scope_not_comparable
+            last_seen_advanced: true
+    - id: run_capability
+      bump_baseline_capability: true
+      hosts: *expanded_hosts
+      exclusions:
+        - cov-d.alerts.bench.example
+      probe_outcomes:
+        silent.alerts.bench.example: no_result
+        headers.alerts.bench.example: no_result
+        down.alerts.bench.example: host_not_reachable
+      capture_headers:
+        headers.alerts.bench.example: false
+      probe_overrides:
+        <<: *hsts_absent
+        title.alerts.bench.example:
+          title: Beta
+      expect:
+        new_alert_count: 1
+        new_alerts:
+          - alert_type: capability_comparison_suppressed
+            category: informational
+            priority: info
+        forbid_alert_types:
+          - resolved_condition_reappeared
+        open_episodes:
+          - alert_type: hsts_lost
+            hostname: hsts.alerts.bench.example
+            last_seen_advanced: false
+          - alert_type: capability_comparison_suppressed
+            last_seen_advanced: true
+

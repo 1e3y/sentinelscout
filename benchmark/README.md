@@ -69,6 +69,7 @@ treat the DNS label `test` as a staging marker.
 | `header-surface` | yes | HSTS present / missing / JSON / capture-unavailable / redirect-final-only |
 | `coverage-gaps` | yes | Coverage accounting: all-observed, probe no-result, known-unreachable, header capture unavailable, validation inconclusive, excluded host |
 | `monitoring-diff` | yes | Multi-run comparison: snapshot-to-snapshot diffs, probe_no_result vs removal, scope change, capability suppression |
+| `monitoring-alerts` | **no** | Multi-run alert episodes from frozen diffs. Run explicitly until the first trusted result is reviewed |
 | `retest-delta` | **no** | Fixture C: take staging down, expect a passing retest. Run explicitly until the harness is trusted |
 
 ## Commands
@@ -88,6 +89,9 @@ uv run python -m app.benchmark run --fixture coverage-gaps --mode offline --save
 
 uv run python -m app.benchmark run --fixture monitoring-diff --mode offline --save
 
+# monitoring-alerts — explicit only, not the default CI pack
+uv run python -m app.benchmark run --fixture monitoring-alerts --mode offline --save
+
 # Fixture C — explicit only, not the default CI pack
 uv run python -m app.benchmark run --fixture retest-delta --mode offline --save
 
@@ -98,7 +102,7 @@ uv run python -m app.benchmark compare --against ../../benchmark/results/baselin
 uv run python -m app.benchmark serve --fixture visible-surface --port 18080
 ```
 
-`--all` is **only** `visible-surface`, `naming-traps`, `header-surface`, and `coverage-gaps`.
+`--all` is **only** `visible-surface`, `naming-traps`, `header-surface`, `coverage-gaps`, and `monitoring-diff`. `retest-delta` and `monitoring-alerts` are explicit.
 
 CI fails if the benchmark crashes, fixtures fail to start, schema/result
 generation fails, or tests fail. CI does **not** fail because candidate/asset

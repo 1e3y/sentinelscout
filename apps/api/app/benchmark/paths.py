@@ -43,4 +43,5 @@ ALL_FIXTURES = (
     "header-surface",
     "coverage-gaps",
     "monitoring-diff",
+    "monitoring-alerts",
 )

@@ -103,7 +103,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
 
 def _cmd_compare(args: argparse.Namespace) -> int:
-    fixture_ids = ALL_FIXTURES if args.include_retest_delta else DEFAULT_CI_FIXTURES
+    fixture_ids = (
+        DEFAULT_CI_FIXTURES + ("retest-delta",)
+        if args.include_retest_delta
+        else DEFAULT_CI_FIXTURES
+    )
     pack = compare_pack(
         results_dir=Path(args.results),
         baselines_dir=Path(args.against),

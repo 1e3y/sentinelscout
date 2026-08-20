@@ -1,0 +1,391 @@
+{
+  "alerts": {
+    "all_correct": true,
+    "cases": {
+      "run1": {
+        "actual_new_alert_count": 0,
+        "actual_new_alert_types": [],
+        "correct": true,
+        "episode_errors": [],
+        "expected_new_alert_count": 0,
+        "extra": [],
+        "forbidden_categories": [],
+        "forbidden_types": [],
+        "header_security_regression": [],
+        "last_seen": {},
+        "missing": [],
+        "outbox_ok": true,
+        "receipt_ok": true
+      },
+      "run2": {
+        "actual_new_alert_count": 1,
+        "actual_new_alert_types": [
+          "hsts_lost"
+        ],
+        "correct": true,
+        "episode_errors": [],
+        "expected_new_alert_count": 1,
+        "extra": [],
+        "forbidden_categories": [],
+        "forbidden_types": [],
+        "header_security_regression": [],
+        "last_seen": {
+          "hsts_lost|hsts.alerts.bench.example|-": "354e4687-1a8a-4b24-b317-631698c98d9f"
+        },
+        "missing": [],
+        "outbox_ok": true,
+        "receipt_ok": true
+      },
+      "run3": {
+        "actual_new_alert_count": 0,
+        "actual_new_alert_types": [],
+        "correct": true,
+        "episode_errors": [],
+        "expected_new_alert_count": 0,
+        "extra": [],
+        "forbidden_categories": [],
+        "forbidden_types": [],
+        "header_security_regression": [],
+        "last_seen": {
+          "hsts_lost|hsts.alerts.bench.example|-": "f38cd05f-064d-4d0a-86fe-44b8a4974087"
+        },
+        "missing": [],
+        "outbox_ok": true,
+        "receipt_ok": true
+      },
+      "run4": {
+        "actual_new_alert_count": 0,
+        "actual_new_alert_types": [],
+        "correct": true,
+        "episode_errors": [],
+        "expected_new_alert_count": 0,
+        "extra": [],
+        "forbidden_categories": [],
+        "forbidden_types": [],
+        "header_security_regression": [],
+        "last_seen": {
+          "hsts_lost|hsts.alerts.bench.example|-": "f38cd05f-064d-4d0a-86fe-44b8a4974087"
+        },
+        "missing": [],
+        "outbox_ok": true,
+        "receipt_ok": true
+      },
+      "run5": {
+        "actual_new_alert_count": 1,
+        "actual_new_alert_types": [
+          "hsts_lost"
+        ],
+        "correct": true,
+        "episode_errors": [],
+        "expected_new_alert_count": 1,
+        "extra": [],
+        "forbidden_categories": [],
+        "forbidden_types": [],
+        "header_security_regression": [],
+        "last_seen": {
+          "hsts_lost|hsts.alerts.bench.example|-": "2248309a-82f4-4495-a1fa-e633a412b1c1"
+        },
+        "missing": [],
+        "outbox_ok": true,
+        "receipt_ok": true
+      },
+      "run_added": {
+        "actual_new_alert_count": 0,
+        "actual_new_alert_types": [],
+        "correct": true,
+        "episode_errors": [],
+        "expected_new_alert_count": 0,
+        "extra": [],
+        "forbidden_categories": [],
+        "forbidden_types": [],
+        "header_security_regression": [],
+        "last_seen": {
+          "header_evidence_coverage_degraded|-|-": "2a739dc2-b172-4c0f-8890-3ca0828bee8c",
+          "header_evidence_lost|headers.alerts.bench.example|-": "2a739dc2-b172-4c0f-8890-3ca0828bee8c",
+          "hsts_lost|hsts.alerts.bench.example|-": "fdbdf5ed-e5aa-486d-aa4b-cc39ac2770f0",
+          "http_observation_coverage_degraded|-|-": "419b7f29-c043-470c-b11e-71c8433dc2c3"
+        },
+        "missing": [],
+        "outbox_ok": true,
+        "receipt_ok": true
+      },
+      "run_capability": {
+        "actual_new_alert_count": 1,
+        "actual_new_alert_types": [
+          "capability_comparison_suppressed"
+        ],
+        "correct": true,
+        "episode_errors": [],
+        "expected_new_alert_count": 1,
+        "extra": [],
+        "forbidden_categories": [],
+        "forbidden_types": [],
+        "header_security_regression": [],
+        "last_seen": {
+          "capability_comparison_suppressed|-|-": "324ad633-8a78-4bb8-abc0-e4899dff8a88",
+          "header_evidence_coverage_degraded|-|-": "2a739dc2-b172-4c0f-8890-3ca0828bee8c",
+          "header_evidence_lost|headers.alerts.bench.example|-": "2a739dc2-b172-4c0f-8890-3ca0828bee8c",
+          "hsts_lost|hsts.alerts.bench.example|-": "e06beea2-ac75-4e34-829e-a47f7d3e882e",
+          "http_observation_coverage_degraded|-|-": "e06beea2-ac75-4e34-829e-a47f7d3e882e",
+          "http_observation_lost_explicit|down.alerts.bench.example|host_not_reachable": "e06beea2-ac75-4e34-829e-a47f7d3e882e",
+          "scope_not_comparable|-|-": "8e6e0443-b6f4-4553-a436-0085aa5bfcf2"
+        },
+        "missing": [],
+        "outbox_ok": true,
+        "receipt_ok": true
+      },
+      "run_cov_degrade": {
+        "actual_new_alert_count": 1,
+        "actual_new_alert_types": [
+          "http_observation_coverage_degraded"
+        ],
+        "correct": true,
+        "episode_errors": [],
+        "expected_new_alert_count": 1,
+        "extra": [],
+        "forbidden_categories": [],
+        "forbidden_types": [],
+        "header_security_regression": [],
+        "last_seen": {
+          "hsts_lost|hsts.alerts.bench.example|-": "0a982e79-f3a4-46fd-ae2a-db190d29fe63",
+          "http_observation_coverage_degraded|-|-": "0a982e79-f3a4-46fd-ae2a-db190d29fe63"
+        },
+        "missing": [],
+        "outbox_ok": true,
+        "receipt_ok": true
+      },
+      "run_cov_partial": {
+        "actual_new_alert_count": 0,
+        "actual_new_alert_types": [],
+        "correct": true,
+        "episode_errors": [],
+        "expected_new_alert_count": 0,
+        "extra": [],
+        "forbidden_categories": [],
+        "forbidden_types": [],
+        "header_security_regression": [],
+        "last_seen": {
+          "hsts_lost|hsts.alerts.bench.example|-": "9d35f939-591f-46bd-8998-25ba0c031711",
+          "http_observation_coverage_degraded|-|-": "9d35f939-591f-46bd-8998-25ba0c031711"
+        },
+        "missing": [],
+        "outbox_ok": true,
+        "receipt_ok": true
+      },
+      "run_cov_restore": {
+        "actual_new_alert_count": 0,
+        "actual_new_alert_types": [],
+        "correct": true,
+        "episode_errors": [],
+        "expected_new_alert_count": 0,
+        "extra": [],
+        "forbidden_categories": [],
+        "forbidden_types": [],
+        "header_security_regression": [],
+        "last_seen": {
+          "hsts_lost|hsts.alerts.bench.example|-": "ae70ffd5-af0e-4068-bd56-8f7ff85276a6",
+          "http_observation_coverage_degraded|-|-": "9d35f939-591f-46bd-8998-25ba0c031711"
+        },
+        "missing": [],
+        "outbox_ok": true,
+        "receipt_ok": true
+      },
+      "run_down": {
+        "actual_new_alert_count": 1,
+        "actual_new_alert_types": [
+          "http_observation_lost_explicit"
+        ],
+        "correct": true,
+        "episode_errors": [],
+        "expected_new_alert_count": 1,
+        "extra": [],
+        "forbidden_categories": [],
+        "forbidden_types": [],
+        "header_security_regression": [],
+        "last_seen": {
+          "header_evidence_coverage_degraded|-|-": "2a739dc2-b172-4c0f-8890-3ca0828bee8c",
+          "header_evidence_lost|headers.alerts.bench.example|-": "2a739dc2-b172-4c0f-8890-3ca0828bee8c",
+          "hsts_lost|hsts.alerts.bench.example|-": "e06beea2-ac75-4e34-829e-a47f7d3e882e",
+          "http_observation_coverage_degraded|-|-": "e06beea2-ac75-4e34-829e-a47f7d3e882e",
+          "http_observation_lost_explicit|down.alerts.bench.example|host_not_reachable": "e06beea2-ac75-4e34-829e-a47f7d3e882e"
+        },
+        "missing": [],
+        "outbox_ok": true,
+        "receipt_ok": true
+      },
+      "run_headers": {
+        "actual_new_alert_count": 2,
+        "actual_new_alert_types": [
+          "header_evidence_lost",
+          "header_evidence_coverage_degraded"
+        ],
+        "correct": true,
+        "episode_errors": [],
+        "expected_new_alert_count": 2,
+        "extra": [],
+        "forbidden_categories": [],
+        "forbidden_types": [],
+        "header_security_regression": [],
+        "last_seen": {
+          "header_evidence_coverage_degraded|-|-": "b8e592cf-b541-43f9-8a5a-05bb5476ae93",
+          "header_evidence_lost|headers.alerts.bench.example|-": "b8e592cf-b541-43f9-8a5a-05bb5476ae93",
+          "hsts_lost|hsts.alerts.bench.example|-": "b8e592cf-b541-43f9-8a5a-05bb5476ae93",
+          "http_observation_coverage_degraded|-|-": "9d35f939-591f-46bd-8998-25ba0c031711"
+        },
+        "missing": [],
+        "outbox_ok": true,
+        "receipt_ok": true
+      },
+      "run_headers2": {
+        "actual_new_alert_count": 0,
+        "actual_new_alert_types": [],
+        "correct": true,
+        "episode_errors": [],
+        "expected_new_alert_count": 0,
+        "extra": [],
+        "forbidden_categories": [],
+        "forbidden_types": [],
+        "header_security_regression": [],
+        "last_seen": {
+          "header_evidence_coverage_degraded|-|-": "2a739dc2-b172-4c0f-8890-3ca0828bee8c",
+          "header_evidence_lost|headers.alerts.bench.example|-": "2a739dc2-b172-4c0f-8890-3ca0828bee8c",
+          "hsts_lost|hsts.alerts.bench.example|-": "2a739dc2-b172-4c0f-8890-3ca0828bee8c",
+          "http_observation_coverage_degraded|-|-": "9d35f939-591f-46bd-8998-25ba0c031711"
+        },
+        "missing": [],
+        "outbox_ok": true,
+        "receipt_ok": true
+      },
+      "run_headers_http_gone": {
+        "actual_new_alert_count": 1,
+        "actual_new_alert_types": [
+          "http_observation_coverage_degraded"
+        ],
+        "correct": true,
+        "episode_errors": [],
+        "expected_new_alert_count": 1,
+        "extra": [],
+        "forbidden_categories": [],
+        "forbidden_types": [],
+        "header_security_regression": [],
+        "last_seen": {
+          "header_evidence_coverage_degraded|-|-": "2a739dc2-b172-4c0f-8890-3ca0828bee8c",
+          "header_evidence_lost|headers.alerts.bench.example|-": "2a739dc2-b172-4c0f-8890-3ca0828bee8c",
+          "hsts_lost|hsts.alerts.bench.example|-": "419b7f29-c043-470c-b11e-71c8433dc2c3",
+          "http_observation_coverage_degraded|-|-": "419b7f29-c043-470c-b11e-71c8433dc2c3"
+        },
+        "missing": [],
+        "outbox_ok": true,
+        "receipt_ok": true
+      },
+      "run_scope": {
+        "actual_new_alert_count": 1,
+        "actual_new_alert_types": [
+          "scope_not_comparable"
+        ],
+        "correct": true,
+        "episode_errors": [],
+        "expected_new_alert_count": 1,
+        "extra": [],
+        "forbidden_categories": [],
+        "forbidden_types": [],
+        "header_security_regression": [],
+        "last_seen": {
+          "header_evidence_coverage_degraded|-|-": "2a739dc2-b172-4c0f-8890-3ca0828bee8c",
+          "header_evidence_lost|headers.alerts.bench.example|-": "2a739dc2-b172-4c0f-8890-3ca0828bee8c",
+          "hsts_lost|hsts.alerts.bench.example|-": "e06beea2-ac75-4e34-829e-a47f7d3e882e",
+          "http_observation_coverage_degraded|-|-": "e06beea2-ac75-4e34-829e-a47f7d3e882e",
+          "http_observation_lost_explicit|down.alerts.bench.example|host_not_reachable": "e06beea2-ac75-4e34-829e-a47f7d3e882e",
+          "scope_not_comparable|-|-": "8e6e0443-b6f4-4553-a436-0085aa5bfcf2"
+        },
+        "missing": [],
+        "outbox_ok": true,
+        "receipt_ok": true
+      },
+      "run_title": {
+        "actual_new_alert_count": 0,
+        "actual_new_alert_types": [],
+        "correct": true,
+        "episode_errors": [],
+        "expected_new_alert_count": 0,
+        "extra": [],
+        "forbidden_categories": [],
+        "forbidden_types": [],
+        "header_security_regression": [],
+        "last_seen": {
+          "hsts_lost|hsts.alerts.bench.example|-": "b89642a0-7fe7-4c28-8084-b62cfd799c98"
+        },
+        "missing": [],
+        "outbox_ok": true,
+        "receipt_ok": true
+      }
+    },
+    "note": "Operation-scoped monitoring alerts from frozen M18 snapshots. Independent of candidate precision. Not a security score."
+  },
+  "candidates": {
+    "emitted": 2,
+    "expected_present": 2,
+    "false_positives_vs_not_candidates": [],
+    "misses": [],
+    "precision_desirable": 1.0,
+    "precision_rule_faithful": 1.0,
+    "recall": 1.0,
+    "unexpected": []
+  },
+  "coverage": {
+    "actual": {
+      "candidates_generated": 2,
+      "clearance_language": false,
+      "configured_exclusions": [
+        "cov-d.alerts.bench.example"
+      ],
+      "discarded_out_of_scope": 1,
+      "findings": 0,
+      "frozen_surface_matches_live": true,
+      "header_evidence_unavailable": 0,
+      "headers_captured": 8,
+      "headline": "Scout evaluated 8/11 in-scope hostnames with usable HTTP observations using 10 supported check classes. 3 in-scope hostname(s) produced no usable HTTP observation. Response headers were captured on 8/8 HTTP observations. 1 discovered result(s) were discarded by authorization scope. 12 capability class(es) are outside current Scout capability. No findings were promoted. That is not evidence that the application is secure.",
+      "host_not_reachable": 1,
+      "http_observation_not_obtained": 3,
+      "http_observation_obtained": 8,
+      "in_scope_discovered": 11,
+      "probe_no_result": 2,
+      "submitted_for_http_observation": 11,
+      "validations_inconclusive": 0
+    },
+    "all_correct": null,
+    "matches": {},
+    "note": "Operation-scoped coverage accounting. Independent of candidate precision. Not a security score."
+  },
+  "duration_ms": 5314,
+  "fixture_id": "monitoring-alerts",
+  "git_sha": "e83ae19fae116911973fbf84bbaae8ef9c8b981d",
+  "known_misses": [],
+  "live_discovery": null,
+  "mode": "offline",
+  "operation_id": "324ad633-8a78-4bb8-abc0-e4899dff8a88",
+  "overlaps": [],
+  "pipeline_assets": {
+    "expected": 12,
+    "extra": [],
+    "found": 8,
+    "missing": [
+      "cov-d.alerts.bench.example",
+      "down.alerts.bench.example",
+      "headers.alerts.bench.example",
+      "silent.alerts.bench.example"
+    ],
+    "note": "Offline/local seeded-host pipeline: whether Scout scoped, probed, persisted, and processed hosts it was handed. Not internet discovery recall.",
+    "pipeline_asset_precision": 1.0,
+    "pipeline_asset_recall": 0.6667
+  },
+  "retest": null,
+  "schema_version": 1,
+  "validation": {
+    "disagreements": [],
+    "expected_supported": 0,
+    "support_rate": null,
+    "supported": 0
+  },
+  "warnings": []
+}

@@ -613,6 +613,89 @@ export function fetchFindings(token: string): Promise<FindingResponse[]> {
   return apiFetch<FindingResponse[]>("/v1/findings", token);
 }
 
+export type AlertResponse = {
+  id: string;
+  organization_id: string;
+  target_id: string;
+  target_domain: string | null;
+  episode_id: string;
+  operation_id: string;
+  diff_summary_id: string;
+  alert_type: string;
+  category: string;
+  priority: string;
+  semantic_key: string;
+  title: string;
+  summary: string;
+  evidence: Record<string, unknown>;
+  created_at: string | null;
+  episode_status: string | null;
+  reopened_from_episode_id: string | null;
+  last_seen_operation_id: string | null;
+  acknowledged_at: string | null;
+  acknowledged_by_user_id: string | null;
+  read_at: string | null;
+  dismissed_at: string | null;
+  disclaimer: string;
+};
+
+export type AlertSummaryResponse = {
+  unread_count: number;
+  open_episode_count: number;
+  visible_alert_count: number;
+  by_category: Record<string, number>;
+  disclaimer: string;
+};
+
+export type AlertListFilters = {
+  category?: string;
+  priority?: string;
+  unread?: boolean;
+  include_dismissed?: boolean;
+};
+
+export function fetchAlerts(
+  token: string,
+  filters: AlertListFilters = {},
+): Promise<AlertResponse[]> {
+  const params = new URLSearchParams();
+  if (filters.category) params.set("category", filters.category);
+  if (filters.priority) params.set("priority", filters.priority);
+  if (filters.unread) params.set("unread", "true");
+  if (filters.include_dismissed) params.set("include_dismissed", "true");
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return apiFetch<AlertResponse[]>(`/v1/alerts${suffix}`, token);
+}
+
+export function fetchAlertSummary(token: string): Promise<AlertSummaryResponse> {
+  return apiFetch<AlertSummaryResponse>("/v1/alerts/summary", token);
+}
+
+export function fetchAlert(token: string, alertId: string): Promise<AlertResponse> {
+  return apiFetch<AlertResponse>(`/v1/alerts/${alertId}`, token);
+}
+
+export function markAlertRead(token: string, alertId: string): Promise<AlertResponse> {
+  return apiFetch<AlertResponse>(`/v1/alerts/${alertId}/read`, token, {
+    method: "POST",
+  });
+}
+
+export function acknowledgeAlert(
+  token: string,
+  alertId: string,
+): Promise<AlertResponse> {
+  return apiFetch<AlertResponse>(`/v1/alerts/${alertId}/acknowledge`, token, {
+    method: "POST",
+  });
+}
+
+export function dismissAlert(token: string, alertId: string): Promise<AlertResponse> {
+  return apiFetch<AlertResponse>(`/v1/alerts/${alertId}/dismiss`, token, {
+    method: "POST",
+  });
+}
+
 export function fetchFinding(
   token: string,
   findingId: string,

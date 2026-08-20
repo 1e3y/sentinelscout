@@ -3,7 +3,7 @@ from __future__ import annotations
 from app.benchmark.compare import compare_pack, format_compare
 from app.benchmark.ground_truth import load_ground_truth
 from app.benchmark.http_loopback import FixtureHttpServer, LoopbackSafeHttpClient
-from app.benchmark.paths import DEFAULT_CI_FIXTURES
+from app.benchmark.paths import ALL_FIXTURES, DEFAULT_CI_FIXTURES
 from app.benchmark.runner import format_human, run_fixture, write_json
 from app.benchmark.schema import validate_result
 
@@ -36,6 +36,8 @@ def test_default_ci_pack_excludes_retest_delta():
         "monitoring-diff",
     )
     assert "retest-delta" not in DEFAULT_CI_FIXTURES
+    assert "monitoring-alerts" not in DEFAULT_CI_FIXTURES
+    assert "monitoring-alerts" in ALL_FIXTURES
 
 
 def test_ground_truth_uses_bench_example_namespace():
@@ -46,6 +48,7 @@ def test_ground_truth_uses_bench_example_namespace():
         "header-surface",
         "coverage-gaps",
         "monitoring-diff",
+        "monitoring-alerts",
     ):
         truth = load_ground_truth(fixture_id)
         assert truth.root == "bench.example" or truth.root.endswith(".bench.example")

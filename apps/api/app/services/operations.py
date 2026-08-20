@@ -22,6 +22,7 @@ from app.services.coverage import (
     coverage_payload_from_snapshot,
     freeze_operation_coverage,
 )
+from app.services.alerts import freeze_operation_alerts
 from app.services.diff import (
     compute_operation_diff,
     diff_payload_from_snapshot,
@@ -519,6 +520,9 @@ def stop_operation(
         freeze_operation_diff(
             db, operation, source="frozen", actor_type="user"
         )
+        freeze_operation_alerts(
+            db, operation, source="frozen", actor_type="user"
+        )
         db.commit()
         return get_operation_or_404(db, operation_id=operation.id, user_id=user_id)
 
@@ -591,15 +595,28 @@ def get_operation_diff(
                 OperationDiffSummary.operation_id == operation.id
             )
         )
+        from app.models.alert import AlertGenerationReceipt
+
+        existing_receipt = None
+        if existing is not None:
+            existing_receipt = db.scalar(
+                select(AlertGenerationReceipt).where(
+                    AlertGenerationReceipt.diff_summary_id == existing.id
+                )
+            )
         row = freeze_operation_diff(
             db,
             operation,
             source="recovered",
             actor_type="system",
         )
-        if existing is None and row is not None:
+        freeze_operation_alerts(
+            db, operation, source="recovered", actor_type="system"
+        )
+        if existing is None or existing_receipt is None:
             db.commit()
-            db.refresh(row)
+            if row is not None:
+                db.refresh(row)
         if row is not None:
             return diff_payload_from_snapshot(db, operation, row)
     payload = compute_operation_diff(db, operation)

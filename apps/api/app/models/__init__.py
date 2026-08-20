@@ -1,3 +1,10 @@
+from app.models.alert import (
+    Alert,
+    AlertEpisode,
+    AlertGenerationReceipt,
+    AlertUserState,
+    NotificationOutbox,
+)
 from app.models.asset import Asset, DiscoveryObservation
 from app.models.audit import AuditEvent
 from app.models.candidate import SecurityCandidate
@@ -35,4 +42,9 @@ __all__ = [
     "MonitoringConfiguration",
     "AuditEvent",
     "RateLimitCounter",
+    "AlertEpisode",
+    "Alert",
+    "AlertUserState",
+    "NotificationOutbox",
+    "AlertGenerationReceipt",
 ]

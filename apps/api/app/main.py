@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import (
+    alerts,
     audit,
     candidates,
     findings,
@@ -67,6 +68,7 @@ def create_app(
     app.include_router(operations.router)
     app.include_router(candidates.router)
     app.include_router(findings.router)
+    app.include_router(alerts.router)
     app.include_router(audit.router)
     return app
 
