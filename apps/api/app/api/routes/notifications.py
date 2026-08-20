@@ -55,7 +55,7 @@ def put_notification_settings_endpoint(
     auth: Annotated[AuthContext, Depends(get_auth_context)],
     db: Annotated[Session, Depends(get_db)],
 ) -> NotificationSettingsResponse:
-    organization, _membership = require_org_admin(org_id, auth, db)
+    organization, _membership, actor = require_org_admin(org_id, auth, db)
     enforce_rate_limit(
         db,
         organization_id=organization.id,
@@ -74,8 +74,8 @@ def put_notification_settings_endpoint(
             ) from exc
     update_notification_settings(
         db,
+        actor=actor,
         organization_id=organization.id,
-        actor_user_id=auth.user.id,
         email_enabled=body.email_enabled,
         email_min_priority=body.email_min_priority,
         recipient_user_ids=recipient_ids,

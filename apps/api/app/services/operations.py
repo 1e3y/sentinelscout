@@ -14,9 +14,14 @@ from app.models.coverage import OperationCoverageSummary
 from app.models.operation import Operation, OperationEvent
 from app.models.operation_controls import TESTING_PROFILE_SAFE_PRODUCTION
 from app.models.target import AuthorizedTarget
-from app.models.user import User
 from app.models.validation import ACTIVE_VALIDATION_STATUSES, ValidationAttempt
 from app.services.audit import record_audit
+from app.services.authorization import (
+    AuthorizedOrgActor,
+    assert_actor_org,
+    merge_auth_audit,
+    require_stop_permission,
+)
 from app.services.coverage import (
     assemble_live_coverage,
     coverage_payload_from_snapshot,
@@ -122,15 +127,9 @@ def append_event(
 def create_operation(
     db: Session,
     *,
-    user: User,
+    actor: AuthorizedOrgActor,
     target_id: UUID,
-    source: str = "manual",
 ) -> Operation:
-    if source not in {"manual", "scheduled"}:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid operation source",
-        )
     target = db.scalar(
         select(AuthorizedTarget)
         .options(
@@ -142,9 +141,10 @@ def create_operation(
     if target is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target not found")
 
+    assert_actor_org(actor, target.organization_id, not_found="Target not found")
     membership = db.scalar(
         select(OrganizationMembership).where(
-            OrganizationMembership.user_id == user.id,
+            OrganizationMembership.user_id == actor.user_id,
             OrganizationMembership.organization_id == target.organization_id,
         )
     )
@@ -171,9 +171,9 @@ def create_operation(
     operation = Operation(
         organization_id=target.organization_id,
         target_id=target.id,
-        created_by_user_id=user.id,
+        created_by_user_id=actor.user_id,
         status="queued",
-        source=source,
+        source="manual",
         testing_profile=TESTING_PROFILE_SAFE_PRODUCTION,
     )
     db.add(operation)
@@ -189,32 +189,35 @@ def create_operation(
             "target_id": str(target.id),
             "domain": target.domain,
             "status": "queued",
-            "source": source,
+            "source": "manual",
         },
     )
     record_audit(
         db,
         organization_id=operation.organization_id,
         actor_type="user",
-        actor_user_id=user.id,
+        actor_user_id=actor.user_id,
         action="operation.created",
         resource_type="operation",
         resource_id=operation.id,
-        summary=f"Operation created for {target.domain} ({source}).",
-        metadata={
-            "target_id": str(target.id),
-            "domain": target.domain,
-            "source": source,
-            "status": "queued",
-            "testing_profile": TESTING_PROFILE_SAFE_PRODUCTION,
-            "authorization_status": target.status,
-            "scope_root": target.scope.root_domain,
-            "include_subdomains": bool(target.scope.include_subdomains),
-            "exclusions_count": len(list(target.scope.exclusions or [])),
-        },
+        summary=f"Operation created for {target.domain} (manual).",
+        metadata=merge_auth_audit(
+            actor,
+            {
+                "target_id": str(target.id),
+                "domain": target.domain,
+                "source": "manual",
+                "status": "queued",
+                "testing_profile": TESTING_PROFILE_SAFE_PRODUCTION,
+                "authorization_status": target.status,
+                "scope_root": target.scope.root_domain,
+                "include_subdomains": bool(target.scope.include_subdomains),
+                "exclusions_count": len(list(target.scope.exclusions or [])),
+            },
+        ),
     )
     db.commit()
-    return get_operation_or_404(db, operation_id=operation.id, user_id=user.id)
+    return get_operation_or_404(db, operation_id=operation.id, user_id=actor.user_id)
 
 
 def list_operations(db: Session, *, user_id: UUID) -> list[Operation]:
@@ -352,9 +355,10 @@ def dismiss_candidate(
     db: Session,
     *,
     candidate_id: UUID,
-    user_id: UUID,
+    actor: AuthorizedOrgActor,
 ) -> SecurityCandidate:
-    candidate = get_candidate_or_404(db, candidate_id=candidate_id, user_id=user_id)
+    candidate = get_candidate_or_404(db, candidate_id=candidate_id, user_id=actor.user_id)
+    assert_actor_org(actor, candidate.organization_id, not_found="Candidate not found")
     if candidate.status == "dismissed":
         return candidate
     candidate.status = "dismissed"
@@ -376,18 +380,21 @@ def dismiss_candidate(
         db,
         organization_id=candidate.organization_id,
         actor_type="user",
-        actor_user_id=user_id,
+        actor_user_id=actor.user_id,
         action="candidate.dismissed",
         resource_type="candidate",
         resource_id=candidate.id,
         summary=f"Security candidate dismissed: {candidate.title}",
-        metadata={
-            "candidate_id": str(candidate.id),
-            "candidate_type": candidate.candidate_type,
-            "asset_id": str(candidate.asset_id),
-            "operation_id": str(candidate.operation_id),
-            "status": "dismissed",
-        },
+        metadata=merge_auth_audit(
+            actor,
+            {
+                "candidate_id": str(candidate.id),
+                "candidate_type": candidate.candidate_type,
+                "asset_id": str(candidate.asset_id),
+                "operation_id": str(candidate.operation_id),
+                "status": "dismissed",
+            },
+        ),
     )
     db.commit()
     db.refresh(candidate)
@@ -398,9 +405,10 @@ def queue_candidate_validation(
     db: Session,
     *,
     candidate_id: UUID,
-    user_id: UUID,
+    actor: AuthorizedOrgActor,
 ) -> ValidationAttempt:
-    candidate = get_candidate_or_404(db, candidate_id=candidate_id, user_id=user_id)
+    candidate = get_candidate_or_404(db, candidate_id=candidate_id, user_id=actor.user_id)
+    assert_actor_org(actor, candidate.organization_id, not_found="Candidate not found")
     if candidate.status == "dismissed":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -436,20 +444,23 @@ def queue_candidate_validation(
         db,
         organization_id=candidate.organization_id,
         actor_type="user",
-        actor_user_id=user_id,
+        actor_user_id=actor.user_id,
         action="validation.requested",
         resource_type="validation_attempt",
         resource_id=attempt.id,
         summary=f"Safe validation requested for candidate: {candidate.title}",
-        metadata={
-            "candidate_id": str(candidate.id),
-            "candidate_type": candidate.candidate_type,
-            "operation_id": str(candidate.operation_id),
-            "asset_id": str(candidate.asset_id),
-            "validation_method": method,
-            "status": "pending",
-            "validation_attempt_id": str(attempt.id),
-        },
+        metadata=merge_auth_audit(
+            actor,
+            {
+                "candidate_id": str(candidate.id),
+                "candidate_type": candidate.candidate_type,
+                "operation_id": str(candidate.operation_id),
+                "asset_id": str(candidate.asset_id),
+                "validation_method": method,
+                "status": "pending",
+                "validation_attempt_id": str(attempt.id),
+            },
+        ),
     )
     db.commit()
     db.refresh(attempt)
@@ -476,9 +487,10 @@ def stop_operation(
     db: Session,
     *,
     operation_id: UUID,
-    user_id: UUID,
+    actor: AuthorizedOrgActor,
 ) -> Operation:
-    operation = get_operation_or_404(db, operation_id=operation_id, user_id=user_id)
+    operation = get_operation_or_404(db, operation_id=operation_id, user_id=actor.user_id)
+    require_stop_permission(operation, actor)
 
     if operation.status in TERMINAL_STATUSES:
         raise HTTPException(
@@ -501,18 +513,21 @@ def stop_operation(
             db,
             organization_id=operation.organization_id,
             actor_type="user",
-            actor_user_id=user_id,
+            actor_user_id=actor.user_id,
             action="operation.stopped",
             resource_type="operation",
             resource_id=operation.id,
             summary="Scout operation stopped before start.",
-            metadata={
-                "operation_id": str(operation.id),
-                "target_id": str(operation.target_id),
-                "status": "stopped",
-                "source": operation.source,
-                "testing_profile": operation.testing_profile,
-            },
+            metadata=merge_auth_audit(
+                actor,
+                {
+                    "operation_id": str(operation.id),
+                    "target_id": str(operation.target_id),
+                    "status": "stopped",
+                    "source": operation.source,
+                    "testing_profile": operation.testing_profile,
+                },
+            ),
         )
         freeze_operation_coverage(
             db, operation, source="frozen", actor_type="user"
@@ -524,7 +539,7 @@ def stop_operation(
             db, operation, source="frozen", actor_type="user"
         )
         db.commit()
-        return get_operation_or_404(db, operation_id=operation.id, user_id=user_id)
+        return get_operation_or_404(db, operation_id=operation.id, user_id=actor.user_id)
 
     if operation.status == "running":
         # Cooperative cancellation: worker notices between stages.
@@ -533,21 +548,24 @@ def stop_operation(
             db,
             organization_id=operation.organization_id,
             actor_type="user",
-            actor_user_id=user_id,
+            actor_user_id=actor.user_id,
             action="operation.stopped",
             resource_type="operation",
             resource_id=operation.id,
             summary="Stop requested for running Scout operation.",
-            metadata={
-                "operation_id": str(operation.id),
-                "target_id": str(operation.target_id),
-                "status": "running",
-                "source": operation.source,
-                "reason": "stop_requested",
-            },
+            metadata=merge_auth_audit(
+                actor,
+                {
+                    "operation_id": str(operation.id),
+                    "target_id": str(operation.target_id),
+                    "status": "running",
+                    "source": operation.source,
+                    "reason": "stop_requested",
+                },
+            ),
         )
         db.commit()
-        return get_operation_or_404(db, operation_id=operation.id, user_id=user_id)
+        return get_operation_or_404(db, operation_id=operation.id, user_id=actor.user_id)
 
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,

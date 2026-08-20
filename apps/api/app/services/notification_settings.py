@@ -17,6 +17,7 @@ from app.models.notification import (
 from app.models.organization import OrganizationMembership
 from app.models.user import User
 from app.services.audit import record_audit
+from app.services.authorization import AuthorizedOrgActor, assert_admin_actor, merge_auth_audit
 
 PRIORITY_RANK = {"info": 0, "low": 1, "medium": 2}
 
@@ -100,12 +101,13 @@ def serialize_notification_settings(
 def update_notification_settings(
     db: Session,
     *,
+    actor: AuthorizedOrgActor,
     organization_id: UUID,
-    actor_user_id: UUID,
     email_enabled: bool,
     email_min_priority: str,
     recipient_user_ids: list[UUID],
 ) -> OrganizationNotificationSettings:
+    assert_admin_actor(actor, organization_id, not_found="Organization not found")
     if email_min_priority not in EMAIL_MIN_PRIORITIES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -144,13 +146,13 @@ def update_notification_settings(
             organization_id=organization_id,
             email_enabled=email_enabled,
             email_min_priority=email_min_priority,
-            updated_by_user_id=actor_user_id,
+            updated_by_user_id=actor.user_id,
         )
         db.add(settings)
     else:
         settings.email_enabled = email_enabled
         settings.email_min_priority = email_min_priority
-        settings.updated_by_user_id = actor_user_id
+        settings.updated_by_user_id = actor.user_id
 
     existing = list(
         db.scalars(
@@ -170,23 +172,26 @@ def update_notification_settings(
                 OrganizationEmailRecipient(
                     organization_id=organization_id,
                     user_id=user_id,
-                    created_by_user_id=actor_user_id,
+                    created_by_user_id=actor.user_id,
                 )
             )
     record_audit(
         db,
         organization_id=organization_id,
         actor_type="user",
-        actor_user_id=actor_user_id,
+        actor_user_id=actor.user_id,
         action="notification.settings.updated",
         resource_type="organization",
         resource_id=organization_id,
         summary="Notification email settings updated.",
-        metadata={
-            "email_enabled": email_enabled,
-            "email_min_priority": email_min_priority,
-            "recipient_count": len(unique_ids),
-        },
+        metadata=merge_auth_audit(
+            actor,
+            {
+                "email_enabled": email_enabled,
+                "email_min_priority": email_min_priority,
+                "recipient_count": len(unique_ids),
+            },
+        ),
     )
     db.commit()
     db.refresh(settings)

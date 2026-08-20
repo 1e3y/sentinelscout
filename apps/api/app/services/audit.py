@@ -52,6 +52,8 @@ _AUDIT_METADATA_ALLOWLIST = frozenset(
         "outbox_id",
         "channel",
         "last_error_code",
+        "authorization_role",
+        "authorization_basis",
     }
 )
 

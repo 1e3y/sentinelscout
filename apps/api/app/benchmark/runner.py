@@ -46,6 +46,7 @@ from app.models.operation import Operation
 from app.models.retest import RetestAttempt
 from app.models.validation import ValidationAttempt
 from app.services.audit import record_audit
+from app.services.authorization import explicit_org_actor
 from app.services.coverage import (
     coverage_payload_from_snapshot,
     freeze_operation_coverage,
@@ -199,7 +200,7 @@ def _run_retests(
     db: Session,
     *,
     truth: GroundTruth,
-    user_id: UUID,
+    actor,
     operation_id: UUID,
     http_client: LoopbackSafeHttpClient,
     server: FixtureHttpServer,
@@ -215,13 +216,13 @@ def _run_retests(
         if candidate is None:
             actual[spec.candidate_id] = "missing_candidate"
             continue
-        finding = promote_candidate_to_finding(db, candidate_id=candidate.id, user_id=user_id)
-        start_remediation(db, finding_id=finding.id, user_id=user_id)
-        mark_ready_for_retest(db, finding_id=finding.id, user_id=user_id)
+        finding = promote_candidate_to_finding(db, candidate_id=candidate.id, actor=actor)
+        start_remediation(db, finding_id=finding.id, actor=actor)
+        mark_ready_for_retest(db, finding_id=finding.id, actor=actor)
         if spec.after == "staging_down":
             http_client.mark_down(spec.hostname)
             server.mark_down(spec.hostname)
-        attempt = queue_finding_retest(db, finding_id=finding.id, user_id=user_id)
+        attempt = queue_finding_retest(db, finding_id=finding.id, actor=actor)
         executed = execute_retest_job(db, attempt.id, http_client=http_client)
         actual[spec.candidate_id] = executed.status
         db.expire_all()
@@ -482,11 +483,14 @@ def run_monitoring_diff_fixture(
         port = server.start()
         http_client = LoopbackSafeHttpClient(port=port)
         tools = SeededLoopbackDiscoveryTools(truth, http_client)
-        user, _org, target, first_operation = seed_world(
+        user, org, target, first_operation = seed_world(
             db,
             root=truth.root,
             include_subdomains=truth.include_subdomains,
             exclusions=truth.exclusions,
+        )
+        actor = explicit_org_actor(
+            user_id=user.id, organization_id=org.id, normalized_role="admin"
         )
         cases: dict[str, Any] = {}
         operations: dict[str, Operation] = {}
@@ -503,16 +507,16 @@ def run_monitoring_diff_fixture(
                 update_scope(
                     db,
                     target,
+                    actor=actor,
                     include_subdomains=truth.include_subdomains,
                     exclusions=exclusions,
-                    actor_user_id=user.id,
                 )
                 db.refresh(target)
             if index == 0:
                 operation = first_operation
             else:
                 operation = create_operation(
-                    db, user=user, target_id=target.id, source="manual"
+                    db, actor=actor, target_id=target.id
                 )
             _apply_monitoring_run(tools, run)
             operation = _start_operation(db, operation.id)
@@ -806,11 +810,14 @@ def run_monitoring_alerts_fixture(
         port = server.start()
         http_client = LoopbackSafeHttpClient(port=port)
         tools = SeededLoopbackDiscoveryTools(truth, http_client)
-        user, _org, target, first_operation = seed_world(
+        user, org, target, first_operation = seed_world(
             db,
             root=truth.root,
             include_subdomains=truth.include_subdomains,
             exclusions=truth.exclusions,
+        )
+        actor = explicit_org_actor(
+            user_id=user.id, organization_id=org.id, normalized_role="admin"
         )
         cases: dict[str, Any] = {}
         operations: dict[str, Operation] = {}
@@ -843,9 +850,9 @@ def run_monitoring_alerts_fixture(
                 update_scope(
                     db,
                     target,
+                    actor=actor,
                     include_subdomains=truth.include_subdomains,
                     exclusions=exclusions,
-                    actor_user_id=user.id,
                 )
                 db.refresh(target)
             if bool(run.get("simulate_pre_m18")):
@@ -853,7 +860,7 @@ def run_monitoring_alerts_fixture(
                     operation = first_operation
                 else:
                     operation = create_operation(
-                        db, user=user, target_id=target.id, source="manual"
+                        db, actor=actor, target_id=target.id
                     )
                 _apply_monitoring_run(tools, run)
                 operation = _start_operation(db, operation.id)
@@ -877,7 +884,7 @@ def run_monitoring_alerts_fixture(
                 operation = first_operation
             else:
                 operation = create_operation(
-                    db, user=user, target_id=target.id, source="manual"
+                    db, actor=actor, target_id=target.id
                 )
             _apply_monitoring_run(tools, run)
             operation = _start_operation(db, operation.id)
@@ -984,11 +991,14 @@ def run_fixture(
         tools, subfinder_hosts, used_httpx = _build_tools(
             truth=truth, http_client=http_client, mode=mode, warnings=warnings
         )
-        user, _org, _target, operation = seed_world(
+        user, org, _target, operation = seed_world(
             db,
             root=truth.root,
             include_subdomains=truth.include_subdomains,
             exclusions=truth.exclusions,
+        )
+        actor = explicit_org_actor(
+            user_id=user.id, organization_id=org.id, normalized_role="admin"
         )
         operation = _start_operation(db, operation.id)
         executed = execute_discovery_job(db, operation.id, tools)
@@ -1013,7 +1023,7 @@ def run_fixture(
         attempt_ids: list[UUID] = []
         for candidate in candidates:
             attempt = queue_candidate_validation(
-                db, candidate_id=candidate.id, user_id=user.id
+                db, candidate_id=candidate.id, actor=actor
             )
             attempt_ids.append(attempt.id)
         for attempt_id in attempt_ids:
@@ -1024,7 +1034,7 @@ def run_fixture(
         retest_actual = _run_retests(
             db,
             truth=truth,
-            user_id=user.id,
+            actor=actor,
             operation_id=operation.id,
             http_client=http_client,
             server=server,

@@ -16,9 +16,10 @@ import {
 
 type Props = {
   enabled: boolean;
+  isAdmin: boolean;
 };
 
-export function TargetsPanel({ enabled }: Props) {
+export function TargetsPanel({ enabled, isAdmin }: Props) {
   const { getToken } = useAuth();
   const [targets, setTargets] = useState<TargetResponse[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -134,6 +135,7 @@ export function TargetsPanel({ enabled }: Props) {
         </button>
       </div>
 
+      {isAdmin ? (
       <form
         className="flex flex-col gap-2 sm:flex-row"
         onSubmit={(event) => {
@@ -174,6 +176,12 @@ export function TargetsPanel({ enabled }: Props) {
           Add target
         </button>
       </form>
+      ) : (
+        <p className="text-sm text-zinc-600">
+          Organization admins add, verify, revoke, and change the authorized
+          scope of targets.
+        </p>
+      )}
 
       {error ? (
         <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
@@ -217,6 +225,8 @@ export function TargetsPanel({ enabled }: Props) {
           </div>
 
           <div className="flex flex-wrap gap-2">
+            {isAdmin ? (
+              <>
             <button
               type="button"
               disabled={pending || selected.status === "revoked"}
@@ -293,6 +303,8 @@ export function TargetsPanel({ enabled }: Props) {
             >
               Revoke target
             </button>
+              </>
+            ) : null}
           </div>
 
           {selected.status === "revoked" ? (
@@ -320,9 +332,13 @@ export function TargetsPanel({ enabled }: Props) {
                 </div>
               </dl>
             </div>
-          ) : (
+          ) : isAdmin ? (
             <p className="text-sm text-zinc-600">
               Click “Get DNS instructions” to generate a verification challenge.
+            </p>
+          ) : (
+            <p className="text-sm text-zinc-600">
+              DNS verification is managed by organization admins.
             </p>
           )}
 
@@ -332,6 +348,7 @@ export function TargetsPanel({ enabled }: Props) {
               <input
                 type="checkbox"
                 checked={includeSubdomains}
+                disabled={!isAdmin}
                 onChange={(event) => setIncludeSubdomains(event.target.checked)}
               />
               Include subdomains
@@ -342,10 +359,12 @@ export function TargetsPanel({ enabled }: Props) {
                 value={exclusionInput}
                 onChange={(event) => setExclusionInput(event.target.value)}
                 rows={4}
+                disabled={!isAdmin}
                 className="w-full rounded-md border border-zinc-300 px-3 py-2 font-mono text-xs"
                 placeholder={"dev.example.com\nstaging.example.com"}
               />
             </label>
+            {isAdmin ? (
             <button
               type="button"
               disabled={pending}
@@ -376,6 +395,11 @@ export function TargetsPanel({ enabled }: Props) {
             >
               Save scope
             </button>
+            ) : (
+              <p className="text-xs text-zinc-500">
+                Scope is read-only for organization members.
+              </p>
+            )}
             {visibleScope ? (
               <p className="text-xs text-zinc-500">
                 Root: {visibleScope.root_domain}. Current exclusions:{" "}

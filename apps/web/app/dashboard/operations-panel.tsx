@@ -30,6 +30,8 @@ import {
 
 type Props = {
   enabled: boolean;
+  isAdmin: boolean;
+  currentUserId: string | null;
 };
 
 function formatTime(value: string | null | undefined): string {
@@ -37,7 +39,7 @@ function formatTime(value: string | null | undefined): string {
   return new Date(value).toLocaleString();
 }
 
-export function OperationsPanel({ enabled }: Props) {
+export function OperationsPanel({ enabled, isAdmin, currentUserId }: Props) {
   const { getToken } = useAuth();
   const [operations, setOperations] = useState<OperationResponse[]>([]);
   const [targets, setTargets] = useState<TargetResponse[]>([]);
@@ -66,6 +68,11 @@ export function OperationsPanel({ enabled }: Props) {
     : (verifiedTargets[0]?.id ?? "");
   const isActive =
     selected?.status === "queued" || selected?.status === "running";
+  const canStop =
+    Boolean(isActive) &&
+    (isAdmin ||
+      (selected?.source === "manual" &&
+        selected.created_by_user_id === currentUserId));
 
   async function withToken<T>(fn: (token: string) => Promise<T>): Promise<T | null> {
     const token = await getToken();
@@ -396,7 +403,7 @@ export function OperationsPanel({ enabled }: Props) {
               </dl>
             </div>
 
-            {isActive ? (
+            {canStop ? (
               <button
                 type="button"
                 disabled={pending || selected.stop_requested}

@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.api.deps import AuthContext, get_auth_context, get_db
+from app.api.deps import AuthContext, get_auth_context, get_db, require_active_org_actor
 from app.schemas.alert import AlertResponse, AlertSummaryResponse
 from app.services.alerts import (
     acknowledge_alert,
@@ -83,8 +83,9 @@ def read_alert_endpoint(
     auth: Annotated[AuthContext, Depends(get_auth_context)],
     db: Annotated[Session, Depends(get_db)],
 ) -> AlertResponse:
-    alert = get_alert_or_404(db, alert_id=alert_id, user_id=auth.user.id)
-    mark_alert_read(db, alert=alert, user_id=auth.user.id)
+    actor = require_active_org_actor(auth)
+    alert = get_alert_or_404(db, alert_id=alert_id, user_id=actor.user_id)
+    mark_alert_read(db, alert=alert, actor=actor)
     db.refresh(alert)
     return AlertResponse.model_validate(
         serialize_alert_for_user(db, alert=alert, user_id=auth.user.id)
@@ -97,8 +98,9 @@ def acknowledge_alert_endpoint(
     auth: Annotated[AuthContext, Depends(get_auth_context)],
     db: Annotated[Session, Depends(get_db)],
 ) -> AlertResponse:
-    alert = get_alert_or_404(db, alert_id=alert_id, user_id=auth.user.id)
-    acknowledge_alert(db, alert=alert, user_id=auth.user.id)
+    actor = require_active_org_actor(auth)
+    alert = get_alert_or_404(db, alert_id=alert_id, user_id=actor.user_id)
+    acknowledge_alert(db, alert=alert, actor=actor)
     db.refresh(alert)
     return AlertResponse.model_validate(
         serialize_alert_for_user(db, alert=alert, user_id=auth.user.id)
@@ -111,8 +113,9 @@ def dismiss_alert_endpoint(
     auth: Annotated[AuthContext, Depends(get_auth_context)],
     db: Annotated[Session, Depends(get_db)],
 ) -> AlertResponse:
-    alert = get_alert_or_404(db, alert_id=alert_id, user_id=auth.user.id)
-    dismiss_alert(db, alert=alert, user_id=auth.user.id)
+    actor = require_active_org_actor(auth)
+    alert = get_alert_or_404(db, alert_id=alert_id, user_id=actor.user_id)
+    dismiss_alert(db, alert=alert, actor=actor)
     db.refresh(alert)
     return AlertResponse.model_validate(
         serialize_alert_for_user(db, alert=alert, user_id=auth.user.id)

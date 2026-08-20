@@ -23,6 +23,7 @@ from app.models.operation import Operation
 from app.models.organization import OrganizationMembership
 from app.models.target import AuthorizedTarget
 from app.services.audit import record_audit
+from app.services.authorization import AuthorizedOrgActor, assert_actor_org, merge_auth_audit
 from app.services.coverage import (
     EXPLICIT_PROBE_OUTCOMES,
     REASON_PROBE_NO_RESULT,
@@ -1005,28 +1006,33 @@ def _user_state(db: Session, *, alert: Alert, user_id: UUID) -> AlertUserState:
     return row
 
 
-def mark_alert_read(db: Session, *, alert: Alert, user_id: UUID) -> AlertUserState:
-    state = _user_state(db, alert=alert, user_id=user_id)
+def mark_alert_read(db: Session, *, alert: Alert, actor: AuthorizedOrgActor) -> AlertUserState:
+    assert_actor_org(actor, alert.organization_id, not_found="Alert not found")
+    state = _user_state(db, alert=alert, user_id=actor.user_id)
     if state.read_at is None:
         state.read_at = _now()
         record_audit(
             db,
             organization_id=alert.organization_id,
             actor_type="user",
-            actor_user_id=user_id,
+            actor_user_id=actor.user_id,
             action="alert.read",
             resource_type="alert",
             resource_id=alert.id,
             summary="Alert marked read.",
-            metadata={"alert_id": str(alert.id), "operation_id": str(alert.operation_id)},
+            metadata=merge_auth_audit(
+                actor,
+                {"alert_id": str(alert.id), "operation_id": str(alert.operation_id)},
+            ),
         )
     db.commit()
     db.refresh(state)
     return state
 
 
-def dismiss_alert(db: Session, *, alert: Alert, user_id: UUID) -> AlertUserState:
-    state = _user_state(db, alert=alert, user_id=user_id)
+def dismiss_alert(db: Session, *, alert: Alert, actor: AuthorizedOrgActor) -> AlertUserState:
+    assert_actor_org(actor, alert.organization_id, not_found="Alert not found")
+    state = _user_state(db, alert=alert, user_id=actor.user_id)
     now = _now()
     if state.read_at is None:
         state.read_at = now
@@ -1036,36 +1042,43 @@ def dismiss_alert(db: Session, *, alert: Alert, user_id: UUID) -> AlertUserState
             db,
             organization_id=alert.organization_id,
             actor_type="user",
-            actor_user_id=user_id,
+            actor_user_id=actor.user_id,
             action="alert.dismissed",
             resource_type="alert",
             resource_id=alert.id,
             summary="Alert dismissed for this user.",
-            metadata={"alert_id": str(alert.id), "operation_id": str(alert.operation_id)},
+            metadata=merge_auth_audit(
+                actor,
+                {"alert_id": str(alert.id), "operation_id": str(alert.operation_id)},
+            ),
         )
     db.commit()
     db.refresh(state)
     return state
 
 
-def acknowledge_alert(db: Session, *, alert: Alert, user_id: UUID) -> Alert:
+def acknowledge_alert(db: Session, *, alert: Alert, actor: AuthorizedOrgActor) -> Alert:
     """Org-level acknowledgement. Does not close the episode or hide it for others."""
-    state = _user_state(db, alert=alert, user_id=user_id)
+    assert_actor_org(actor, alert.organization_id, not_found="Alert not found")
+    state = _user_state(db, alert=alert, user_id=actor.user_id)
     if state.read_at is None:
         state.read_at = _now()
     if alert.acknowledged_at is None:
         alert.acknowledged_at = _now()
-        alert.acknowledged_by_user_id = user_id
+        alert.acknowledged_by_user_id = actor.user_id
         record_audit(
             db,
             organization_id=alert.organization_id,
             actor_type="user",
-            actor_user_id=user_id,
+            actor_user_id=actor.user_id,
             action="alert.acknowledged",
             resource_type="alert",
             resource_id=alert.id,
             summary="Alert acknowledged for the organization.",
-            metadata={"alert_id": str(alert.id), "operation_id": str(alert.operation_id)},
+            metadata=merge_auth_audit(
+                actor,
+                {"alert_id": str(alert.id), "operation_id": str(alert.operation_id)},
+            ),
         )
     db.commit()
     db.refresh(alert)

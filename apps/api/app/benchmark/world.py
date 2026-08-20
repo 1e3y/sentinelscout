@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.models.organization import Organization, OrganizationMembership
 from app.models.target import AuthorizedTarget, TargetAuthorization, TargetScope
 from app.models.user import User
+from app.services.authorization import explicit_org_actor
 from app.services.operations import create_operation
 
 
@@ -70,5 +71,8 @@ def seed_world(
     db.commit()
     db.refresh(user)
     db.refresh(target)
-    operation = create_operation(db, user=user, target_id=target.id, source="manual")
+    actor = explicit_org_actor(
+        user_id=user.id, organization_id=org.id, normalized_role="admin"
+    )
+    operation = create_operation(db, actor=actor, target_id=target.id)
     return user, org, target, operation

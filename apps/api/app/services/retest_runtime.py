@@ -19,6 +19,7 @@ from app.models.organization import OrganizationMembership
 from app.models.retest import ACTIVE_RETEST_STATUSES, RetestAttempt
 from app.models.validation import ValidationAttempt
 from app.services.audit import record_audit
+from app.services.authorization import AuthorizedOrgActor, assert_actor_org, merge_auth_audit
 from app.services.discovery.execute import AuthorizationExecutionError
 from app.services.operations import append_event
 from app.services.validation_engine.engine import (
@@ -134,14 +135,15 @@ def queue_finding_retest(
     db: Session,
     *,
     finding_id: UUID,
-    user_id: UUID,
+    actor: AuthorizedOrgActor,
 ) -> RetestAttempt:
     finding = db.get(Finding, finding_id)
     if finding is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Finding not found")
     _require_org_membership(
-        db, user_id=user_id, organization_id=finding.organization_id
+        db, user_id=actor.user_id, organization_id=finding.organization_id
     )
+    assert_actor_org(actor, finding.organization_id, not_found="Finding not found")
 
     if finding.status != "ready_for_retest":
         raise HTTPException(
@@ -191,21 +193,24 @@ def queue_finding_retest(
         db,
         organization_id=finding.organization_id,
         actor_type="user",
-        actor_user_id=user_id,
+        actor_user_id=actor.user_id,
         action="retest.requested",
         resource_type="retest_attempt",
         resource_id=attempt.id,
         summary=f"Safe retest requested for finding: {finding.title}",
-        metadata={
-            "finding_id": str(finding.id),
-            "candidate_id": str(finding.candidate_id),
-            "asset_id": str(finding.asset_id),
-            "operation_id": str(finding.operation_id),
-            "retest_id": str(attempt.id),
-            "validation_attempt_id": str(original.id),
-            "validation_method": method,
-            "status": "pending",
-        },
+        metadata=merge_auth_audit(
+            actor,
+            {
+                "finding_id": str(finding.id),
+                "candidate_id": str(finding.candidate_id),
+                "asset_id": str(finding.asset_id),
+                "operation_id": str(finding.operation_id),
+                "retest_id": str(attempt.id),
+                "validation_attempt_id": str(original.id),
+                "validation_method": method,
+                "status": "pending",
+            },
+        ),
     )
     db.commit()
     db.refresh(attempt)

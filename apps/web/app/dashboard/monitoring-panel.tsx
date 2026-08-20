@@ -12,6 +12,7 @@ import {
 
 type Props = {
   enabled: boolean;
+  isAdmin: boolean;
 };
 
 function formatTime(value: string | null | undefined): string {
@@ -19,7 +20,7 @@ function formatTime(value: string | null | undefined): string {
   return new Date(value).toLocaleString();
 }
 
-export function MonitoringPanel({ enabled }: Props) {
+export function MonitoringPanel({ enabled, isAdmin }: Props) {
   const { getToken } = useAuth();
   const [targets, setTargets] = useState<TargetResponse[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -211,6 +212,8 @@ export function MonitoringPanel({ enabled }: Props) {
               </dl>
 
               <div className="flex flex-wrap items-end gap-3">
+                {isAdmin ? (
+                  <>
                 <label className="text-xs text-zinc-600">
                   Frequency
                   <select
@@ -290,6 +293,13 @@ export function MonitoringPanel({ enabled }: Props) {
                 >
                   Disable
                 </button>
+                  </>
+                ) : (
+                  <p className="text-xs text-zinc-500">
+                    Organization admins enable, disable, and change monitoring
+                    cadence.
+                  </p>
+                )}
               </div>
             </div>
           ) : null}

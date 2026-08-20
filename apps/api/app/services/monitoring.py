@@ -14,8 +14,8 @@ from app.models.monitoring import MONITORING_FREQUENCIES, MonitoringConfiguratio
 from app.services.diff import latest_diff_counts
 from app.models.organization import OrganizationMembership
 from app.models.target import AuthorizedTarget
-from app.models.user import User
 from app.services.audit import record_audit
+from app.services.authorization import AuthorizedOrgActor, assert_admin_actor, merge_auth_audit
 
 
 def compute_next_run_at(frequency: str, *, from_time: datetime | None = None) -> datetime:
@@ -67,8 +67,8 @@ def get_monitoring_for_target(
 def upsert_monitoring(
     db: Session,
     *,
+    actor: AuthorizedOrgActor,
     target_id: UUID,
-    user: User,
     enabled: bool,
     frequency: str,
 ) -> MonitoringConfiguration:
@@ -78,7 +78,8 @@ def upsert_monitoring(
             detail="frequency must be 'daily' or 'weekly'",
         )
 
-    target = _require_target_for_user(db, target_id=target_id, user_id=user.id)
+    target = _require_target_for_user(db, target_id=target_id, user_id=actor.user_id)
+    assert_admin_actor(actor, target.organization_id, not_found="Target not found")
 
     if enabled:
         if target.status == "revoked":
@@ -109,7 +110,7 @@ def upsert_monitoring(
             target_id=target.id,
             enabled=enabled,
             frequency=frequency,
-            updated_by_user_id=user.id,
+            updated_by_user_id=actor.user_id,
             next_run_at=compute_next_run_at(frequency, from_time=now) if enabled else None,
             disabled_reason=None if enabled else "Monitoring disabled by user.",
         )
@@ -117,7 +118,7 @@ def upsert_monitoring(
     else:
         config.enabled = enabled
         config.frequency = frequency
-        config.updated_by_user_id = user.id
+        config.updated_by_user_id = actor.user_id
         config.updated_at = now
         if enabled:
             config.disabled_reason = None
@@ -133,20 +134,23 @@ def upsert_monitoring(
         db,
         organization_id=target.organization_id,
         actor_type="user",
-        actor_user_id=user.id,
+        actor_user_id=actor.user_id,
         action=action,
         resource_type="monitoring",
         resource_id=config.id,
         summary=(
             f"Monitoring {'enabled' if enabled else 'disabled'} for {target.domain} ({frequency})."
         ),
-        metadata={
-            "target_id": str(target.id),
-            "domain": target.domain,
-            "enabled": enabled,
-            "frequency": frequency,
-            "status": "enabled" if enabled else "disabled",
-        },
+        metadata=merge_auth_audit(
+            actor,
+            {
+                "target_id": str(target.id),
+                "domain": target.domain,
+                "enabled": enabled,
+                "frequency": frequency,
+                "status": "enabled" if enabled else "disabled",
+            },
+        ),
     )
     db.commit()
     db.refresh(config)

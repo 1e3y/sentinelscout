@@ -4,12 +4,13 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import AuthContext, get_auth_context, get_db
+from app.api.deps import AuthContext, get_auth_context, get_db, require_active_org_actor
 from app.models.asset import Asset
 from app.schemas.candidate import SecurityCandidateResponse
 from app.schemas.audit import FindingProvenanceResponse
 from app.schemas.finding import FindingResponse
 from app.schemas.validation import ValidationAttemptResponse
+from app.services.authorization import assert_actor_org
 from app.services.findings import promote_candidate_to_finding
 from app.services.operations import (
     dismiss_candidate,
@@ -75,7 +76,8 @@ def dismiss_candidate_endpoint(
     auth: Annotated[AuthContext, Depends(get_auth_context)],
     db: Annotated[Session, Depends(get_db)],
 ) -> SecurityCandidateResponse:
-    candidate = dismiss_candidate(db, candidate_id=candidate_id, user_id=auth.user.id)
+    actor = require_active_org_actor(auth)
+    candidate = dismiss_candidate(db, candidate_id=candidate_id, actor=actor)
     asset = db.get(Asset, candidate.asset_id)
     return _to_candidate_response(candidate, asset)
 
@@ -90,15 +92,17 @@ def validate_candidate_endpoint(
     auth: Annotated[AuthContext, Depends(get_auth_context)],
     db: Annotated[Session, Depends(get_db)],
 ) -> ValidationAttemptResponse:
-    candidate = get_candidate_or_404(db, candidate_id=candidate_id, user_id=auth.user.id)
+    actor = require_active_org_actor(auth)
+    candidate = get_candidate_or_404(db, candidate_id=candidate_id, user_id=actor.user_id)
+    assert_actor_org(actor, candidate.organization_id, not_found="Candidate not found")
     enforce_rate_limit(
         db,
         organization_id=candidate.organization_id,
-        user_id=auth.user.id,
+        user_id=actor.user_id,
         action=ACTION_VALIDATION,
     )
     attempt = queue_candidate_validation(
-        db, candidate_id=candidate_id, user_id=auth.user.id
+        db, candidate_id=candidate_id, actor=actor
     )
     return _to_attempt_response(attempt)
 
@@ -127,8 +131,9 @@ def promote_candidate_endpoint(
     auth: Annotated[AuthContext, Depends(get_auth_context)],
     db: Annotated[Session, Depends(get_db)],
 ) -> FindingResponse:
+    actor = require_active_org_actor(auth)
     finding = promote_candidate_to_finding(
-        db, candidate_id=candidate_id, user_id=auth.user.id
+        db, candidate_id=candidate_id, actor=actor
     )
     asset = db.get(Asset, finding.asset_id)
     provenance = FindingProvenanceResponse.model_validate(

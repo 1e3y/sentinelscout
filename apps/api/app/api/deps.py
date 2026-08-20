@@ -12,6 +12,11 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.core.security import AuthenticatedIdentity, TokenVerifier
 from app.models import Organization, OrganizationMembership, User
+from app.services.authorization import (
+    AuthorizedOrgActor,
+    effective_authorized_role,
+    persistable_org_role,
+)
 from app.services.clerk import ClerkDirectory
 from app.services.sync import sync_user_from_clerk
 
@@ -24,6 +29,18 @@ class AuthContext:
     user: User
     active_organization: Organization | None
     active_membership: OrganizationMembership | None
+    directory_role: str | None
+
+    def org_actor(self) -> AuthorizedOrgActor | None:
+        if self.active_organization is None:
+            return None
+        return AuthorizedOrgActor(
+            user_id=self.user.id,
+            organization_id=self.active_organization.id,
+            normalized_role=effective_authorized_role(
+                self.identity.active_org_role, self.directory_role
+            ),
+        )
 
 
 def get_token_verifier(request: Request) -> TokenVerifier:
@@ -55,6 +72,7 @@ def get_auth_context(
 
     active_organization: Organization | None = None
     active_membership: OrganizationMembership | None = None
+    directory_role: str | None = None
     if identity.active_org_id:
         active_organization = db.scalar(
             select(Organization).where(Organization.clerk_org_id == identity.active_org_id)
@@ -69,50 +87,36 @@ def get_auth_context(
             # Active org from JWT without persisted membership is ignored.
             if active_membership is None:
                 active_organization = None
-            elif identity.active_org_role and active_membership.role != identity.active_org_role:
-                active_membership.role = identity.active_org_role
-                db.commit()
-                db.refresh(active_membership)
+            else:
+                directory_role = active_membership.role
+                effective = effective_authorized_role(
+                    identity.active_org_role, directory_role
+                )
+                if effective is not None and active_membership.role != persistable_org_role(
+                    effective
+                ):
+                    active_membership.role = persistable_org_role(effective)
+                    db.commit()
+                    db.refresh(active_membership)
 
     return AuthContext(
         identity=identity,
         user=user,
         active_organization=active_organization,
         active_membership=active_membership,
+        directory_role=directory_role,
     )
 
 
 def verified_org_admin_role(auth: AuthContext, organization: Organization) -> bool:
-    """True only when the verified JWT org-role for this org is org:admin."""
-    token_org = auth.identity.active_org_id
-    token_role = auth.identity.active_org_role
+    """True only when the verified request identity authorizes admin for this org."""
+    actor = auth.org_actor()
     return (
-        bool(token_org)
-        and token_org == organization.clerk_org_id
-        and token_role == "org:admin"
+        actor is not None
+        and actor.organization_id == organization.id
+        and actor.is_admin
+        and auth.identity.active_org_id == organization.clerk_org_id
     )
-
-
-def require_org_admin(
-    org_id: UUID,
-    auth: AuthContext,
-    db: Session,
-) -> tuple[Organization, OrganizationMembership]:
-    organization, membership = require_org_membership(org_id, auth, db)
-    token_org = auth.identity.active_org_id
-    token_role = auth.identity.active_org_role
-    if not token_org or token_org != organization.clerk_org_id or not token_role:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Verified organization role is required",
-        )
-    if token_role != "org:admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Organization admin required",
-        )
-    membership.role = token_role
-    return organization, membership
 
 
 def require_org_membership(
@@ -134,3 +138,67 @@ def require_org_membership(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
 
     return organization, membership
+
+
+def require_org_member(
+    org_id: UUID,
+    auth: AuthContext,
+    db: Session,
+) -> tuple[Organization, OrganizationMembership, AuthorizedOrgActor]:
+    if auth.active_organization is None or auth.active_membership is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Active organization required",
+        )
+    organization, membership = require_org_membership(org_id, auth, db)
+    if auth.active_organization.id != organization.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+    actor = auth.org_actor()
+    if actor is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Active organization required",
+        )
+    return organization, membership, actor
+
+
+def require_org_admin(
+    org_id: UUID,
+    auth: AuthContext,
+    db: Session,
+) -> tuple[Organization, OrganizationMembership, AuthorizedOrgActor]:
+    organization, membership, actor = require_org_member(org_id, auth, db)
+    token_org = auth.identity.active_org_id
+    token_role = auth.identity.active_org_role
+    if not token_org or token_org != organization.clerk_org_id or not token_role:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Verified organization role is required",
+        )
+    if actor.normalized_role is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Verified organization role is required",
+        )
+    if not actor.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Organization admin required",
+        )
+    membership.role = persistable_org_role("admin")
+    return organization, membership, actor
+
+
+def require_active_org_actor(auth: AuthContext) -> AuthorizedOrgActor:
+    if auth.active_organization is None or auth.active_membership is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Active organization required",
+        )
+    actor = auth.org_actor()
+    if actor is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Active organization required",
+        )
+    return actor

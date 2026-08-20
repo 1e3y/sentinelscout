@@ -13,3 +13,4 @@ class UserResponse(BaseModel):
     name: str | None
     created_at: datetime
     active_organization_id: UUID | None = None
+    active_organization_role: str | None = None

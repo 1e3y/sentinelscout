@@ -44,6 +44,7 @@ def test_me_persists_user(client, make_token, seed_user_a, db_session):
     assert body["email"] == "alice@example.com"
     assert body["name"] == "Alice"
     assert body["active_organization_id"] is not None
+    assert body["active_organization_role"] == "admin"
 
     db_session.expire_all()
     user = db_session.scalar(select(User).where(User.clerk_user_id == user_id))

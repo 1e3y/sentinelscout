@@ -14,6 +14,7 @@ from app.services.coverage import (
     freeze_operation_coverage,
 )
 from app.services.discovery.runner import FakeDiscoveryTools, ProbeResult
+from app.services.authorization import explicit_org_actor
 from app.services.operations import stop_operation
 from app.services.validation_engine.http import FakeSafeHttpClient
 from app.services.validation_engine.types import SafeHttpObservation
@@ -234,7 +235,11 @@ def test_stopped_before_probe_is_incomplete_not_unreachable(
             stop_operation(
                 db_session,
                 operation_id=UUID(operation_id),
-                user_id=UUID(me["id"]),
+                actor=explicit_org_actor(
+                    user_id=UUID(me["id"]),
+                    organization_id=UUID(me["active_organization_id"]),
+                    normalized_role="admin",
+                ),
             )
             db_session.commit()
             return hosts, note

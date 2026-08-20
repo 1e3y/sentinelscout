@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
@@ -17,6 +16,7 @@ from app.models.operation import Operation
 from app.models.organization import OrganizationMembership
 from app.models.validation import ValidationAttempt
 from app.services.audit import record_audit
+from app.services.authorization import AuthorizedOrgActor, assert_actor_org, merge_auth_audit
 from app.services.findings.catalog import (
     business_impact_for_candidate_type,
     remediation_guidance_for_candidate_type,
@@ -113,14 +113,15 @@ def promote_candidate_to_finding(
     db: Session,
     *,
     candidate_id: UUID,
-    user_id: UUID,
+    actor: AuthorizedOrgActor,
 ) -> Finding:
     candidate = db.get(SecurityCandidate, candidate_id)
     if candidate is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
     _require_org_membership(
-        db, user_id=user_id, organization_id=candidate.organization_id
+        db, user_id=actor.user_id, organization_id=candidate.organization_id
     )
+    assert_actor_org(actor, candidate.organization_id, not_found="Candidate not found")
 
     existing = db.scalar(
         select(Finding).where(Finding.candidate_id == candidate.id)
@@ -205,21 +206,24 @@ def promote_candidate_to_finding(
         db,
         organization_id=finding.organization_id,
         actor_type="user",
-        actor_user_id=user_id,
+        actor_user_id=actor.user_id,
         action="finding.created",
         resource_type="finding",
         resource_id=finding.id,
         summary=f"Finding created from supported candidate: {finding.title}",
-        metadata={
-            "finding_id": str(finding.id),
-            "candidate_id": str(candidate.id),
-            "asset_id": str(candidate.asset_id),
-            "operation_id": str(candidate.operation_id),
-            "candidate_type": candidate.candidate_type,
-            "severity": finding.severity,
-            "status": finding.status,
-            "validation_attempt_id": str(attempt.id),
-        },
+        metadata=merge_auth_audit(
+            actor,
+            {
+                "finding_id": str(finding.id),
+                "candidate_id": str(candidate.id),
+                "asset_id": str(candidate.asset_id),
+                "operation_id": str(candidate.operation_id),
+                "candidate_type": candidate.candidate_type,
+                "severity": finding.severity,
+                "status": finding.status,
+                "validation_attempt_id": str(attempt.id),
+            },
+        ),
     )
     db.commit()
     db.refresh(finding)

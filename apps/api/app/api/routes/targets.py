@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
-from app.api.deps import AuthContext, get_auth_context, get_db
+from app.api.deps import AuthContext, get_auth_context, get_db, require_org_admin
 from app.schemas.monitoring import MonitoringConfigurationResponse, UpsertMonitoringRequest
 from app.schemas.target import (
     CreateTargetRequest,
@@ -85,6 +85,7 @@ def create_target_endpoint(
 ) -> TargetResponse:
     require_active_organization(auth)
     assert auth.active_organization is not None
+    _, _, actor = require_org_admin(auth.active_organization.id, auth, db)
     enforce_rate_limit(
         db,
         organization_id=auth.active_organization.id,
@@ -93,8 +94,8 @@ def create_target_endpoint(
     )
     target = create_target(
         db,
+        actor=actor,
         organization_id=auth.active_organization.id,
-        created_by_user_id=auth.user.id,
         raw_domain=body.domain,
     )
     return _to_target_response(target)
@@ -133,16 +134,17 @@ def start_verification_endpoint(
 ) -> TargetResponse:
     require_active_organization(auth)
     assert auth.active_organization is not None
+    target = get_org_target_or_404(
+        db, target_id=target_id, organization_id=auth.active_organization.id
+    )
+    _, _, actor = require_org_admin(auth.active_organization.id, auth, db)
     enforce_rate_limit(
         db,
         organization_id=auth.active_organization.id,
         user_id=auth.user.id,
         action=ACTION_VERIFICATION,
     )
-    target = get_org_target_or_404(
-        db, target_id=target_id, organization_id=auth.active_organization.id
-    )
-    target = start_verification(db, target, actor_user_id=auth.user.id)
+    target = start_verification(db, target, actor=actor)
     return _to_target_response(target)
 
 
@@ -155,17 +157,18 @@ def verify_target_endpoint(
 ) -> VerifyTargetResponse:
     require_active_organization(auth)
     assert auth.active_organization is not None
+    target = get_org_target_or_404(
+        db, target_id=target_id, organization_id=auth.active_organization.id
+    )
+    _, _, actor = require_org_admin(auth.active_organization.id, auth, db)
     enforce_rate_limit(
         db,
         organization_id=auth.active_organization.id,
         user_id=auth.user.id,
         action=ACTION_VERIFICATION,
     )
-    target = get_org_target_or_404(
-        db, target_id=target_id, organization_id=auth.active_organization.id
-    )
     target, verified, detail = verify_target_dns(
-        db, target, resolver, actor_user_id=auth.user.id
+        db, target, resolver, actor=actor
     )
     return VerifyTargetResponse(
         id=target.id,
@@ -208,12 +211,13 @@ def update_scope_endpoint(
     target = get_org_target_or_404(
         db, target_id=target_id, organization_id=auth.active_organization.id
     )
+    _, _, actor = require_org_admin(auth.active_organization.id, auth, db)
     scope = update_scope(
         db,
         target,
+        actor=actor,
         include_subdomains=body.include_subdomains,
         exclusions=body.exclusions,
-        actor_user_id=auth.user.id,
     )
     return _to_scope_response(scope)
 
@@ -229,7 +233,8 @@ def revoke_target_endpoint(
     target = get_org_target_or_404(
         db, target_id=target_id, organization_id=auth.active_organization.id
     )
-    target = revoke_target(db, target, actor_user_id=auth.user.id)
+    _, _, actor = require_org_admin(auth.active_organization.id, auth, db)
+    target = revoke_target(db, target, actor=actor)
     return _to_target_response(target)
 
 
@@ -293,14 +298,14 @@ def upsert_monitoring_endpoint(
 ) -> MonitoringConfigurationResponse:
     require_active_organization(auth)
     assert auth.active_organization is not None
-    # Ensure target is in active org before upsert (upsert also checks membership).
     get_org_target_or_404(
         db, target_id=target_id, organization_id=auth.active_organization.id
     )
+    _, _, actor = require_org_admin(auth.active_organization.id, auth, db)
     config = upsert_monitoring(
         db,
+        actor=actor,
         target_id=target_id,
-        user=auth.user,
         enabled=body.enabled,
         frequency=body.frequency,
     )

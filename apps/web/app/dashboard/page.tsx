@@ -83,10 +83,12 @@ export default async function DashboardPage() {
                   <dt className="text-zinc-500">Name</dt>
                   <dd>{activeOrg.name}</dd>
                 </div>
-                <div>
-                  <dt className="text-zinc-500">Role</dt>
-                  <dd className="font-mono text-xs">{activeOrg.role}</dd>
-                </div>
+              <div>
+                <dt className="text-zinc-500">Role</dt>
+                <dd className="font-mono text-xs">
+                  {me?.active_organization_role ?? "unverified"}
+                </dd>
+              </div>
               </dl>
             ) : (
               <p className="text-sm text-zinc-600">
@@ -96,11 +98,21 @@ export default async function DashboardPage() {
             )}
           </section>
 
-          <TargetsPanel enabled={Boolean(activeOrg)} />
-          <MonitoringPanel enabled={Boolean(activeOrg)} />
+          <TargetsPanel
+            enabled={Boolean(activeOrg)}
+            isAdmin={me?.active_organization_role === "admin"}
+          />
+          <MonitoringPanel
+            enabled={Boolean(activeOrg)}
+            isAdmin={me?.active_organization_role === "admin"}
+          />
           <AlertsPanel enabled={Boolean(activeOrg)} />
           <NotificationSettingsPanel enabled={Boolean(activeOrg)} />
-          <OperationsPanel enabled={Boolean(activeOrg)} />
+          <OperationsPanel
+            enabled={Boolean(activeOrg)}
+            isAdmin={me?.active_organization_role === "admin"}
+            currentUserId={me?.id ?? null}
+          />
           <FindingsPanel enabled={Boolean(activeOrg)} />
           <AuditPanel enabled={Boolean(activeOrg)} />
         </>

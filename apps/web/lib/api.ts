@@ -6,8 +6,9 @@ export type MeResponse = {
   clerk_user_id: string;
   email: string;
   name: string | null;
-  created_at: string;
-  active_organization_id: string | null;
+    created_at: string;
+    active_organization_id: string | null;
+    active_organization_role: "admin" | "member" | null;
 };
 
 export type OrganizationResponse = {

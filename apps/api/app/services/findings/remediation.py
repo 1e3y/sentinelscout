@@ -16,6 +16,7 @@ from app.models.finding import ALLOWED_REMEDIATION_TRANSITIONS, Finding
 from app.models.operation import Operation
 from app.models.organization import OrganizationMembership
 from app.services.audit import record_audit
+from app.services.authorization import AuthorizedOrgActor, assert_actor_org, merge_auth_audit
 from app.services.operations import append_event
 
 
@@ -66,7 +67,7 @@ def _transition(
     target_status: str,
     event_type: str,
     summary: str,
-    actor_user_id: UUID,
+    actor: AuthorizedOrgActor,
 ) -> Finding:
     allowed = ALLOWED_REMEDIATION_TRANSITIONS.get(finding.status, frozenset())
     if target_status == "resolved":
@@ -102,45 +103,50 @@ def _transition(
         db,
         organization_id=finding.organization_id,
         actor_type="user",
-        actor_user_id=actor_user_id,
+        actor_user_id=actor.user_id,
         action=event_type,
         resource_type="finding",
         resource_id=finding.id,
         summary=summary,
-        metadata={
-            "finding_id": str(finding.id),
-            "candidate_id": str(finding.candidate_id),
-            "asset_id": str(finding.asset_id),
-            "operation_id": str(finding.operation_id),
-            "previous_status": previous,
-            "new_status": finding.status,
-            "severity": finding.severity,
-        },
+        metadata=merge_auth_audit(
+            actor,
+            {
+                "finding_id": str(finding.id),
+                "candidate_id": str(finding.candidate_id),
+                "asset_id": str(finding.asset_id),
+                "operation_id": str(finding.operation_id),
+                "previous_status": previous,
+                "new_status": finding.status,
+                "severity": finding.severity,
+            },
+        ),
     )
     db.commit()
     db.refresh(finding)
     return finding
 
 
-def start_remediation(db: Session, *, finding_id: UUID, user_id: UUID) -> Finding:
-    finding = get_finding_or_404(db, finding_id=finding_id, user_id=user_id)
+def start_remediation(db: Session, *, finding_id: UUID, actor: AuthorizedOrgActor) -> Finding:
+    finding = get_finding_or_404(db, finding_id=finding_id, user_id=actor.user_id)
+    assert_actor_org(actor, finding.organization_id, not_found="Finding not found")
     return _transition(
         db,
         finding=finding,
         target_status="in_progress",
         event_type="finding.remediation_started",
         summary=f"Remediation started for finding: {finding.title}",
-        actor_user_id=user_id,
+        actor=actor,
     )
 
 
-def mark_ready_for_retest(db: Session, *, finding_id: UUID, user_id: UUID) -> Finding:
-    finding = get_finding_or_404(db, finding_id=finding_id, user_id=user_id)
+def mark_ready_for_retest(db: Session, *, finding_id: UUID, actor: AuthorizedOrgActor) -> Finding:
+    finding = get_finding_or_404(db, finding_id=finding_id, user_id=actor.user_id)
+    assert_actor_org(actor, finding.organization_id, not_found="Finding not found")
     return _transition(
         db,
         finding=finding,
         target_status="ready_for_retest",
         event_type="finding.ready_for_retest",
         summary=f"Finding marked ready for retest: {finding.title}",
-        actor_user_id=user_id,
+        actor=actor,
     )

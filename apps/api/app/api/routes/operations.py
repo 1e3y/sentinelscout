@@ -1,11 +1,11 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import AuthContext, get_auth_context, get_db
+from app.api.deps import AuthContext, get_auth_context, get_db, require_active_org_actor
 from app.models.asset import Asset
 from app.schemas.candidate import SecurityCandidateResponse
 from app.schemas.discovery import AssetResponse, DiscoveryObservationResponse
@@ -98,18 +98,14 @@ def create_operation_endpoint(
     auth: Annotated[AuthContext, Depends(get_auth_context)],
     db: Annotated[Session, Depends(get_db)],
 ) -> OperationResponse:
-    if auth.active_organization is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Active organization required",
-        )
+    actor = require_active_org_actor(auth)
     enforce_rate_limit(
         db,
-        organization_id=auth.active_organization.id,
-        user_id=auth.user.id,
+        organization_id=actor.organization_id,
+        user_id=actor.user_id,
         action=ACTION_OPERATION_CREATE,
     )
-    operation = create_operation(db, user=auth.user, target_id=body.target_id)
+    operation = create_operation(db, actor=actor, target_id=body.target_id)
     return _to_operation_response(operation)
 
 
@@ -248,5 +244,6 @@ def stop_operation_endpoint(
     auth: Annotated[AuthContext, Depends(get_auth_context)],
     db: Annotated[Session, Depends(get_db)],
 ) -> OperationResponse:
-    operation = stop_operation(db, operation_id=operation_id, user_id=auth.user.id)
+    actor = require_active_org_actor(auth)
+    operation = stop_operation(db, operation_id=operation_id, actor=actor)
     return _to_operation_response(operation)

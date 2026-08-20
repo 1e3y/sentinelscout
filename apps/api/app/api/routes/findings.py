@@ -5,11 +5,12 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import AuthContext, get_auth_context, get_db
+from app.api.deps import AuthContext, get_auth_context, get_db, require_active_org_actor
 from app.models.asset import Asset
 from app.schemas.audit import FindingProvenanceResponse
 from app.schemas.finding import FindingResponse
 from app.schemas.retest import RetestAttemptResponse
+from app.services.authorization import assert_actor_org
 from app.services.findings import (
     get_finding_or_404,
     list_findings_for_user,
@@ -91,7 +92,8 @@ def start_remediation_endpoint(
     auth: Annotated[AuthContext, Depends(get_auth_context)],
     db: Annotated[Session, Depends(get_db)],
 ) -> FindingResponse:
-    finding = start_remediation(db, finding_id=finding_id, user_id=auth.user.id)
+    actor = require_active_org_actor(auth)
+    finding = start_remediation(db, finding_id=finding_id, actor=actor)
     asset = db.get(Asset, finding.asset_id)
     return _to_finding_response(db, finding, asset)
 
@@ -102,7 +104,8 @@ def ready_for_retest_endpoint(
     auth: Annotated[AuthContext, Depends(get_auth_context)],
     db: Annotated[Session, Depends(get_db)],
 ) -> FindingResponse:
-    finding = mark_ready_for_retest(db, finding_id=finding_id, user_id=auth.user.id)
+    actor = require_active_org_actor(auth)
+    finding = mark_ready_for_retest(db, finding_id=finding_id, actor=actor)
     asset = db.get(Asset, finding.asset_id)
     return _to_finding_response(db, finding, asset)
 
@@ -134,14 +137,16 @@ def queue_retest_endpoint(
     auth: Annotated[AuthContext, Depends(get_auth_context)],
     db: Annotated[Session, Depends(get_db)],
 ) -> RetestAttemptResponse:
-    finding = get_finding_or_404(db, finding_id=finding_id, user_id=auth.user.id)
+    actor = require_active_org_actor(auth)
+    finding = get_finding_or_404(db, finding_id=finding_id, user_id=actor.user_id)
+    assert_actor_org(actor, finding.organization_id, not_found="Finding not found")
     enforce_rate_limit(
         db,
         organization_id=finding.organization_id,
-        user_id=auth.user.id,
+        user_id=actor.user_id,
         action=ACTION_RETEST,
     )
-    attempt = queue_finding_retest(db, finding_id=finding_id, user_id=auth.user.id)
+    attempt = queue_finding_retest(db, finding_id=finding_id, actor=actor)
     return _to_retest_response(attempt)
 
 

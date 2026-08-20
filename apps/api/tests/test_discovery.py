@@ -10,6 +10,7 @@ from app.models.asset import Asset, DiscoveryObservation
 from app.models.target import AuthorizedTarget
 from app.services.discovery.runner import FakeDiscoveryTools, ProbeResult
 from app.services.discovery.scope import filter_hosts_for_scope, host_in_scope
+from app.services.authorization import explicit_org_actor
 from app.services.operations import stop_operation
 from app.services.worker_runtime import (
     SAFE_AUTHZ_FAILURE_CODE,
@@ -389,7 +390,15 @@ def test_stop_request_respected_during_discovery(
     me = client.get("/v1/me", headers=_auth(token)).json()
     stop_db = factory()
     try:
-        stop_operation(stop_db, operation_id=UUID(operation_id), user_id=UUID(me["id"]))
+        stop_operation(
+            stop_db,
+            operation_id=UUID(operation_id),
+            actor=explicit_org_actor(
+                user_id=UUID(me["id"]),
+                organization_id=UUID(me["active_organization_id"]),
+                normalized_role="admin",
+            ),
+        )
     finally:
         stop_db.close()
 

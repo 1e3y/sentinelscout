@@ -10,6 +10,11 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.models.target import AuthorizedTarget, TargetAuthorization, TargetScope
 from app.services.audit import record_audit
+from app.services.authorization import (
+    AuthorizedOrgActor,
+    assert_admin_actor,
+    merge_auth_audit,
+)
 from app.services.dns import DnsTxtResolver
 from app.services.domains import (
     build_txt_name,
@@ -56,10 +61,11 @@ def get_org_target_or_404(
 def create_target(
     db: Session,
     *,
+    actor: AuthorizedOrgActor,
     organization_id: UUID,
-    created_by_user_id: UUID,
     raw_domain: str,
 ) -> AuthorizedTarget:
+    assert_admin_actor(actor, organization_id, not_found="Target not found")
     domain = normalize_domain(raw_domain)
 
     existing = db.scalar(
@@ -76,7 +82,7 @@ def create_target(
 
     target = AuthorizedTarget(
         organization_id=organization_id,
-        created_by_user_id=created_by_user_id,
+        created_by_user_id=actor.user_id,
         domain=domain,
         status="unverified",
     )
@@ -94,12 +100,15 @@ def create_target(
         db,
         organization_id=organization_id,
         actor_type="user",
-        actor_user_id=created_by_user_id,
+        actor_user_id=actor.user_id,
         action="target.created",
         resource_type="target",
         resource_id=target.id,
         summary=f"Target created: {domain}.",
-        metadata={"target_id": str(target.id), "domain": domain, "status": "unverified"},
+        metadata=merge_auth_audit(
+            actor,
+            {"target_id": str(target.id), "domain": domain, "status": "unverified"},
+        ),
     )
     db.commit()
     db.refresh(target)
@@ -124,8 +133,9 @@ def start_verification(
     db: Session,
     target: AuthorizedTarget,
     *,
-    actor_user_id: UUID | None = None,
+    actor: AuthorizedOrgActor,
 ) -> AuthorizedTarget:
+    assert_admin_actor(actor, target.organization_id, not_found="Target not found")
     if target.status == "revoked":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -161,17 +171,20 @@ def start_verification(
         db,
         organization_id=target.organization_id,
         actor_type="user",
-        actor_user_id=actor_user_id or target.created_by_user_id,
+        actor_user_id=actor.user_id,
         action="target.verification_started",
         resource_type="target",
         resource_id=target.id,
         summary=f"Verification started for {target.domain}.",
-        metadata={
-            "target_id": str(target.id),
-            "domain": target.domain,
-            "status": target.status,
-            "authorization_id": str(authz.id) if authz.id else None,
-        },
+        metadata=merge_auth_audit(
+            actor,
+            {
+                "target_id": str(target.id),
+                "domain": target.domain,
+                "status": target.status,
+                "authorization_id": str(authz.id) if authz.id else None,
+            },
+        ),
     )
     db.commit()
     return get_org_target_or_404(
@@ -184,8 +197,9 @@ def verify_target_dns(
     target: AuthorizedTarget,
     resolver: DnsTxtResolver,
     *,
-    actor_user_id: UUID | None = None,
+    actor: AuthorizedOrgActor,
 ) -> tuple[AuthorizedTarget, bool, str]:
+    assert_admin_actor(actor, target.organization_id, not_found="Target not found")
     if target.status == "revoked":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -224,18 +238,21 @@ def verify_target_dns(
         db,
         organization_id=target.organization_id,
         actor_type="user",
-        actor_user_id=actor_user_id or target.created_by_user_id,
+        actor_user_id=actor.user_id,
         action="target.verified",
         resource_type="target",
         resource_id=target.id,
         summary=f"Target verified: {target.domain}.",
-        metadata={
-            "target_id": str(target.id),
-            "domain": target.domain,
-            "status": "verified",
-            "authorization_status": "verified",
-            "authorization_id": str(authz.id),
-        },
+        metadata=merge_auth_audit(
+            actor,
+            {
+                "target_id": str(target.id),
+                "domain": target.domain,
+                "status": "verified",
+                "authorization_status": "verified",
+                "authorization_id": str(authz.id),
+            },
+        ),
     )
     db.commit()
     return (
@@ -255,10 +272,11 @@ def update_scope(
     db: Session,
     target: AuthorizedTarget,
     *,
+    actor: AuthorizedOrgActor,
     include_subdomains: bool,
     exclusions: list[str],
-    actor_user_id: UUID | None = None,
 ) -> TargetScope:
+    assert_admin_actor(actor, target.organization_id, not_found="Target not found")
     if target.scope is None:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -290,18 +308,21 @@ def update_scope(
         db,
         organization_id=target.organization_id,
         actor_type="user",
-        actor_user_id=actor_user_id or target.created_by_user_id,
+        actor_user_id=actor.user_id,
         action="target.scope_updated",
         resource_type="target",
         resource_id=target.id,
         summary=f"Scope updated for {target.domain}.",
-        metadata={
-            "target_id": str(target.id),
-            "domain": target.domain,
-            "scope_root": target.domain,
-            "include_subdomains": include_subdomains,
-            "exclusions_count": len(normalized_exclusions),
-        },
+        metadata=merge_auth_audit(
+            actor,
+            {
+                "target_id": str(target.id),
+                "domain": target.domain,
+                "scope_root": target.domain,
+                "include_subdomains": include_subdomains,
+                "exclusions_count": len(normalized_exclusions),
+            },
+        ),
     )
     db.commit()
     db.refresh(target.scope)
@@ -316,8 +337,9 @@ def revoke_target(
     db: Session,
     target: AuthorizedTarget,
     *,
-    actor_user_id: UUID | None = None,
+    actor: AuthorizedOrgActor,
 ) -> AuthorizedTarget:
+    assert_admin_actor(actor, target.organization_id, not_found="Target not found")
     if target.status == "revoked":
         return get_org_target_or_404(
             db, target_id=target.id, organization_id=target.organization_id
@@ -329,17 +351,20 @@ def revoke_target(
         db,
         organization_id=target.organization_id,
         actor_type="user",
-        actor_user_id=actor_user_id or target.created_by_user_id,
+        actor_user_id=actor.user_id,
         action="target.revoked",
         resource_type="target",
         resource_id=target.id,
         summary=f"Target revoked: {target.domain}.",
-        metadata={
-            "target_id": str(target.id),
-            "domain": target.domain,
-            "status": "revoked",
-            "authorization_status": "revoked",
-        },
+        metadata=merge_auth_audit(
+            actor,
+            {
+                "target_id": str(target.id),
+                "domain": target.domain,
+                "status": "revoked",
+                "authorization_status": "revoked",
+            },
+        ),
     )
     db.commit()
     return get_org_target_or_404(

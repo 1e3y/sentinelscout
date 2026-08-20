@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlalchemy.orm import sessionmaker
 
 from app.services.discovery.runner import FakeDiscoveryTools, ProbeResult
+from app.services.authorization import explicit_org_actor
 from app.services.operations import stop_operation
 from app.services.worker_runtime import (
     claim_next_operation,
@@ -154,7 +155,11 @@ def test_running_operation_cooperatively_stops(
         stop_operation(
             stop_db,
             operation_id=UUID(operation_id),
-            user_id=UUID(me["id"]),
+            actor=explicit_org_actor(
+                user_id=UUID(me["id"]),
+                organization_id=UUID(me["active_organization_id"]),
+                normalized_role="admin",
+            ),
         )
     finally:
         stop_db.close()

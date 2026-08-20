@@ -111,6 +111,7 @@ def make_token(rsa_keys):
         sub: str,
         org_id: str | None = None,
         org_role: str | None = None,
+        omit_org_role: bool = False,
         expired: bool = False,
         azp: str = "http://localhost:3000",
         issuer: str = "https://clerk.test",
@@ -125,7 +126,10 @@ def make_token(rsa_keys):
             "exp": now - 60 if expired else now + 3600,
         }
         if org_id:
-            claims["o"] = {"id": org_id, "rol": org_role or "org:admin"}
+            org_claims: dict = {"id": org_id}
+            if not omit_org_role:
+                org_claims["rol"] = org_role or "org:admin"
+            claims["o"] = org_claims
         return jwt.encode(claims, private_pem, algorithm="RS256")
 
     return _make
@@ -190,6 +194,6 @@ def seed_user_b(fake_clerk) -> tuple[str, str]:
         email_verified=True,
     )
     fake_clerk.memberships[user_id] = [
-        ClerkOrgMembership(clerk_org_id=org_id, org_name="Org B", role="org:member")
+        ClerkOrgMembership(clerk_org_id=org_id, org_name="Org B", role="org:admin")
     ]
     return user_id, org_id
