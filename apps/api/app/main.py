@@ -14,6 +14,7 @@ from app.api.routes import (
     notifications,
     operations,
     organizations,
+    reports,
     targets,
 )
 from app.core.config import get_settings
@@ -72,6 +73,8 @@ def create_app(
     app.include_router(alerts.router)
     app.include_router(notifications.router)
     app.include_router(audit.router)
+    app.include_router(reports.operation_router)
+    app.include_router(reports.router)
     return app
 
 

@@ -18,6 +18,7 @@ ACTION_OPERATION_CREATE = "operation.create"
 ACTION_VALIDATION = "validation.request"
 ACTION_RETEST = "retest.request"
 ACTION_NOTIFICATION_SETTINGS = "notification.settings"
+ACTION_REPORT_GENERATE = "report.generate"
 
 
 def _limit_for_action(settings: Settings, action: str) -> int:
@@ -28,6 +29,7 @@ def _limit_for_action(settings: Settings, action: str) -> int:
         ACTION_VALIDATION: settings.rate_limit_validation,
         ACTION_RETEST: settings.rate_limit_retest,
         ACTION_NOTIFICATION_SETTINGS: settings.rate_limit_notification_settings,
+        ACTION_REPORT_GENERATE: settings.rate_limit_report_generate,
     }.get(action, settings.rate_limit_operation_create)
 
 

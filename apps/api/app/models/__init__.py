@@ -20,6 +20,7 @@ from app.models.operation import Operation, OperationEvent
 from app.models.operation_controls import OperationControlSnapshot
 from app.models.organization import Organization, OrganizationMembership
 from app.models.rate_limit import RateLimitCounter
+from app.models.report import AssessmentReport
 from app.models.retest import RetestAttempt
 from app.models.target import AuthorizedTarget, TargetAuthorization, TargetScope
 from app.models.user import User
@@ -53,4 +54,5 @@ __all__ = [
     "AlertGenerationReceipt",
     "OrganizationNotificationSettings",
     "OrganizationEmailRecipient",
+    "AssessmentReport",
 ]

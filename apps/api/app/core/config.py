@@ -74,6 +74,7 @@ class Settings(BaseSettings):
     rate_limit_notification_settings: int = Field(
         default=30, alias="RATE_LIMIT_NOTIFICATION_SETTINGS"
     )
+    rate_limit_report_generate: int = Field(default=30, alias="RATE_LIMIT_REPORT_GENERATE")
     rate_limit_window_seconds: int = Field(default=3600, alias="RATE_LIMIT_WINDOW_SECONDS")
 
     email_delivery_enabled: bool = Field(default=False, alias="EMAIL_DELIVERY_ENABLED")

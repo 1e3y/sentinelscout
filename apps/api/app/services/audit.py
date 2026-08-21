@@ -54,6 +54,15 @@ _AUDIT_METADATA_ALLOWLIST = frozenset(
         "last_error_code",
         "authorization_role",
         "authorization_basis",
+        "report_id",
+        "report_version",
+        "schema_version",
+        "snapshot_digest",
+        "operation_status",
+        "headline_status",
+        "assessment_completeness",
+        "findings_total",
+        "findings_open",
     }
 )
 

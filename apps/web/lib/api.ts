@@ -333,6 +333,200 @@ export type RetestAttemptResponse = {
   completed_at: string | null;
 };
 
+export type AssessmentHeadlineStatus =
+  | "assessment_incomplete"
+  | "action_required"
+  | "attention_recommended"
+  | "no_open_supported_findings";
+
+export type AssessmentReportSummaryResponse = {
+  id: string;
+  organization_id: string;
+  target_id: string;
+  operation_id: string;
+  created_by_user_id: string;
+  target_domain: string;
+  report_version: number;
+  schema_version: number;
+  snapshot_digest: string;
+  operation_status_at_generation: string;
+  assessment_completeness: "complete" | "incomplete";
+  headline_status: AssessmentHeadlineStatus;
+  headline_label: string;
+  findings_total: number;
+  findings_open: number;
+  findings_resolved: number;
+  regression_count: number;
+  coverage_limitation_count: number;
+  severity_counts: Record<string, number>;
+  generated_at: string;
+};
+
+export type AssessmentReportCoverageLimitation = {
+  reason_code: string;
+  count: number;
+  explanation: string;
+  source: string;
+};
+
+export type AssessmentReportFinding = {
+  finding_id: string;
+  title: string;
+  summary: string;
+  observation_class: string;
+  severity: string;
+  severity_rank: number;
+  status: string;
+  is_open: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+  resolved_at: string | null;
+  business_impact: string;
+  remediation_guidance: string;
+  affected_asset: { hostname: string | null; url: string | null };
+  validation: {
+    method: string | null;
+    status: string | null;
+    summary: string | null;
+  };
+  retest_attempts: number;
+  latest_retest: {
+    status: string;
+    method: string;
+    summary: string;
+    completed_at: string | null;
+    evidence: Record<string, unknown>;
+  } | null;
+  evidence: Record<string, unknown>;
+};
+
+export type AssessmentReportChange = {
+  change_type?: string;
+  category?: string;
+  significance?: string;
+  match_key?: string;
+  explanation?: string;
+  before?: string | number | boolean;
+  after?: string | number | boolean;
+};
+
+export type AssessmentReportContent = {
+  report_schema_version: number;
+  identity: {
+    organization_id: string;
+    organization_name: string;
+    target_id: string;
+    target_domain: string;
+    target_authorization_status: string;
+    operation_id: string;
+    operation_source: string;
+    operation_status: string;
+    testing_profile: string;
+    assessment_completeness: "complete" | "incomplete";
+    operation_created_at: string | null;
+    operation_started_at: string | null;
+    operation_completed_at: string | null;
+    operation_failed_at: string | null;
+    operation_stopped_at: string | null;
+  };
+  scope: {
+    source: string;
+    explanation: string;
+    scope_root: string;
+    include_subdomains: boolean;
+    exclusions: string[];
+    control_snapshot_created_at: string | null;
+  };
+  coverage: {
+    frozen_operation_coverage: {
+      source: string;
+      explanation: string;
+      freeze_source: string;
+      schema_version: number;
+      frozen_at: string | null;
+      operation_status_at_freeze: string;
+      capability_manifest_version: number;
+      capability: {
+        version?: number;
+        supported?: { id: string; title: string; applies_to: string }[];
+        unsupported?: { id: string; title: string; explanation: string }[];
+      };
+      surface: Record<string, unknown>;
+      http_evidence: Record<string, unknown>;
+      scope_boundaries: Record<string, unknown>;
+      freshness: Record<string, unknown>;
+      headline: string;
+    };
+    follow_up_frozen_for_report: {
+      source: string;
+      explanation: string;
+      counts: Record<string, number>;
+      gaps: AssessmentReportCoverageLimitation[];
+    };
+    limitations: {
+      explanation: string;
+      coverage_limitation_count: number;
+      coverage_limitations: AssessmentReportCoverageLimitation[];
+    };
+  };
+  findings: AssessmentReportFinding[];
+  not_promoted: {
+    explanation: string;
+    candidates_generated: number;
+    validations_conclusive: number;
+    validations_inconclusive: number;
+    validations_failed: number;
+    validations_not_attempted: number;
+  };
+  change_context: {
+    available: boolean;
+    explanation?: string;
+    comparability?: string;
+    baseline_operation_id?: string | null;
+    diff_frozen_at?: string | null;
+    diff_headline?: string;
+    security_signal_comparison_suppressed?: boolean;
+    security_signal_suppression_reason?: string | null;
+    counts?: Record<string, unknown>;
+    security_regressions?: AssessmentReportChange[];
+    coverage_degradations?: AssessmentReportChange[];
+    resolved_conditions_reappeared?: AssessmentReportChange[];
+  };
+  summary: {
+    headline_status: AssessmentHeadlineStatus;
+    headline_label: string;
+    headline_statement: string;
+    assessment_completeness: "complete" | "incomplete";
+    findings_total: number;
+    findings_open: number;
+    findings_resolved: number;
+    severity_counts_open: Record<string, number>;
+    regression_count: number;
+    coverage_limitation_count: number;
+  };
+  methodology: {
+    testing_profile: string;
+    capability_manifest_version: number;
+    supported_classes: { id: string; title: string; applies_to: string }[];
+    unsupported_classes: { id: string; title: string; explanation: string }[];
+    safety_controls: string[];
+  };
+};
+
+export type AssessmentReportResponse = AssessmentReportSummaryResponse & {
+  snapshot: {
+    report_schema_version: number;
+    envelope: {
+      report_id: string;
+      report_version: number;
+      snapshot_digest: string;
+      generated_at: string;
+      generated_by: { user_id: string };
+    };
+    content: AssessmentReportContent;
+  };
+};
+
 async function apiFetch<T>(
   path: string,
   token: string,
@@ -824,4 +1018,47 @@ export function fetchAuditEvents(
     `/v1/audit-events${query ? `?${query}` : ""}`,
     token,
   );
+}
+
+export function generateAssessmentReport(
+  token: string,
+  operationId: string,
+): Promise<AssessmentReportResponse> {
+  return apiFetch<AssessmentReportResponse>(
+    `/v1/operations/${operationId}/report`,
+    token,
+    { method: "POST" },
+  );
+}
+
+export function fetchOperationReports(
+  token: string,
+  operationId: string,
+): Promise<AssessmentReportSummaryResponse[]> {
+  return apiFetch<AssessmentReportSummaryResponse[]>(
+    `/v1/operations/${operationId}/reports`,
+    token,
+  );
+}
+
+export function fetchAssessmentReports(
+  token: string,
+  filters: { target_id?: string; operation_id?: string; limit?: number } = {},
+): Promise<AssessmentReportSummaryResponse[]> {
+  const params = new URLSearchParams();
+  if (filters.target_id) params.set("target_id", filters.target_id);
+  if (filters.operation_id) params.set("operation_id", filters.operation_id);
+  if (filters.limit != null) params.set("limit", String(filters.limit));
+  const query = params.toString();
+  return apiFetch<AssessmentReportSummaryResponse[]>(
+    `/v1/reports${query ? `?${query}` : ""}`,
+    token,
+  );
+}
+
+export function fetchAssessmentReport(
+  token: string,
+  reportId: string,
+): Promise<AssessmentReportResponse> {
+  return apiFetch<AssessmentReportResponse>(`/v1/reports/${reportId}`, token);
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuth } from "@clerk/nextjs";
+import Link from "next/link";
 import { useEffect, useState, useTransition } from "react";
 import {
   createOperation,
@@ -12,11 +13,14 @@ import {
   fetchOperationDiff,
   fetchOperationEvents,
   fetchOperationObservations,
+  fetchOperationReports,
   fetchOperations,
   fetchTargets,
+  generateAssessmentReport,
   promoteCandidate,
   queueCandidateValidation,
   stopOperation,
+  type AssessmentReportSummaryResponse,
   type AssetResponse,
   type DiscoveryObservationResponse,
   type OperationCoverageResponse,
@@ -56,6 +60,7 @@ export function OperationsPanel({ enabled, isAdmin, currentUserId }: Props) {
   const [validationByCandidate, setValidationByCandidate] = useState<
     Record<string, ValidationAttemptResponse[]>
   >({});
+  const [reports, setReports] = useState<AssessmentReportSummaryResponse[]>([]);
   const [createTargetId, setCreateTargetId] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -68,6 +73,10 @@ export function OperationsPanel({ enabled, isAdmin, currentUserId }: Props) {
     : (verifiedTargets[0]?.id ?? "");
   const isActive =
     selected?.status === "queued" || selected?.status === "running";
+  const isTerminal =
+    selected?.status === "completed" ||
+    selected?.status === "failed" ||
+    selected?.status === "stopped";
   const canStop =
     Boolean(isActive) &&
     (isAdmin ||
@@ -89,17 +98,27 @@ export function OperationsPanel({ enabled, isAdmin, currentUserId }: Props) {
       setError("Missing session token");
       return;
     }
-    const [op, nextEvents, nextAssets, nextObservations, nextCandidates, nextCoverage, nextDiff] =
-      await Promise.all([
-        fetchOperation(token, operationId),
-        fetchOperationEvents(token, operationId),
-        fetchOperationAssets(token, operationId),
-        fetchOperationObservations(token, operationId),
-        fetchOperationCandidates(token, operationId),
-        fetchOperationCoverage(token, operationId),
-        fetchOperationDiff(token, operationId),
-      ]);
+    const [
+      op,
+      nextEvents,
+      nextAssets,
+      nextObservations,
+      nextCandidates,
+      nextCoverage,
+      nextDiff,
+      nextReports,
+    ] = await Promise.all([
+      fetchOperation(token, operationId),
+      fetchOperationEvents(token, operationId),
+      fetchOperationAssets(token, operationId),
+      fetchOperationObservations(token, operationId),
+      fetchOperationCandidates(token, operationId),
+      fetchOperationCoverage(token, operationId),
+      fetchOperationDiff(token, operationId),
+      fetchOperationReports(token, operationId),
+    ]);
     setSelected(op);
+    setReports(nextReports);
     setEvents(nextEvents);
     setAssets(nextAssets);
     setObservations(nextObservations);
@@ -435,6 +454,85 @@ export function OperationsPanel({ enabled, isAdmin, currentUserId }: Props) {
                 {selected.stop_requested ? "Stop requested" : "Stop operation"}
               </button>
             ) : null}
+          </div>
+
+          <div className="space-y-2 border-t border-zinc-100 pt-4">
+            <h4 className="text-sm font-medium tracking-wide text-zinc-800">
+              ASSESSMENT REPORT
+            </h4>
+            {isTerminal ? (
+              <p className="text-xs text-zinc-500">
+                Generating a report freezes this operation&apos;s evidence into an
+                immutable artifact. Later changes to findings or target scope never
+                rewrite a generated report.
+                {selected.status === "completed"
+                  ? ""
+                  : " This operation did not run to completion, so the report will be labelled Assessment Incomplete."}
+              </p>
+            ) : (
+              <p className="text-xs text-zinc-500">
+                Reports can only be generated once the operation reaches a terminal
+                status (completed, failed, or stopped).
+              </p>
+            )}
+            {isAdmin && isTerminal ? (
+              <button
+                type="button"
+                disabled={pending}
+                className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm disabled:opacity-50"
+                onClick={() => {
+                  startTransition(async () => {
+                    setError(null);
+                    setMessage(null);
+                    try {
+                      const report = await withToken((token) =>
+                        generateAssessmentReport(token, selected.id),
+                      );
+                      if (!report) return;
+                      setMessage(
+                        `Assessment report v${report.report_version} is ready (${report.headline_label}).`,
+                      );
+                      const next = await withToken((token) =>
+                        fetchOperationReports(token, selected.id),
+                      );
+                      setReports(next ?? []);
+                    } catch (err) {
+                      setError(
+                        err instanceof Error
+                          ? err.message
+                          : "Failed to generate assessment report",
+                      );
+                    }
+                  });
+                }}
+              >
+                Generate assessment report
+              </button>
+            ) : null}
+            {!isAdmin ? (
+              <p className="text-xs text-zinc-500">
+                Only an organization admin can generate an assessment report.
+              </p>
+            ) : null}
+            {reports.length > 0 ? (
+              <ul className="space-y-1 text-sm">
+                {reports.map((report) => (
+                  <li key={report.id} className="flex items-center gap-2">
+                    <Link
+                      href={`/dashboard/reports/${report.id}`}
+                      className="underline underline-offset-2"
+                    >
+                      Version {report.report_version}
+                    </Link>
+                    <span className="text-xs text-zinc-500">
+                      {report.headline_label} · {formatTime(report.generated_at)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs text-zinc-500">No reports generated yet.</p>
+            )}
           </div>
 
           {selected.control_snapshot ? (

@@ -17,3 +17,41 @@ body {
   color: var(--foreground);
   font-family: var(--font-geist-sans), ui-sans-serif, sans-serif;
 }
+
+/* Print / Save as PDF layout for the immutable assessment report. */
+@media print {
+  .report-chrome {
+    display: none;
+  }
+
+  body {
+    background: #ffffff;
+  }
+
+  .report-root {
+    max-width: none;
+    font-size: 11pt;
+  }
+
+  /* Keep the incomplete marker visible on paper even without background printing. */
+  .report-incomplete {
+    border-width: 3px;
+    border-color: #000000;
+    background: #ffffff;
+    color: #000000;
+  }
+
+  .report-section,
+  .report-finding {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .report-section {
+    page-break-before: auto;
+  }
+
+  a[href]::after {
+    content: "";
+  }
+}
