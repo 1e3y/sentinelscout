@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { fetchAssessmentReport } from "@/lib/api";
+import { ExportPdfButton } from "./export-pdf-button";
 import { AssessmentReportView } from "./report-view";
 
 type Props = {
@@ -37,9 +38,7 @@ export default async function AssessmentReportPage({ params }: Props) {
         >
           Back to dashboard
         </Link>
-        <p className="text-xs text-zinc-500">
-          Use your browser&apos;s Print / Save as PDF to export this report.
-        </p>
+        {report ? <ExportPdfButton reportId={reportId} /> : null}
       </div>
 
       {error || !report ? (

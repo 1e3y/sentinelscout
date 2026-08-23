@@ -1062,3 +1062,36 @@ export function fetchAssessmentReport(
 ): Promise<AssessmentReportResponse> {
   return apiFetch<AssessmentReportResponse>(`/v1/reports/${reportId}`, token);
 }
+
+function filenameFromContentDisposition(header: string | null): string {
+  const fallback = "assessment-report.pdf";
+  if (!header) return fallback;
+  const match = /filename="([^"]+)"/i.exec(header);
+  const name = match?.[1] ?? "";
+  if (!/^[a-z0-9][a-z0-9._-]*\.pdf$/.test(name)) return fallback;
+  return name;
+}
+
+export async function exportAssessmentReportPdf(
+  token: string,
+  reportId: string,
+): Promise<{ blob: Blob; filename: string }> {
+  const path = `/v1/reports/${reportId}/pdf`;
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/pdf",
+    },
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`API ${path} failed (${response.status}): ${detail}`);
+  }
+  return {
+    blob: await response.blob(),
+    filename: filenameFromContentDisposition(
+      response.headers.get("Content-Disposition"),
+    ),
+  };
+}

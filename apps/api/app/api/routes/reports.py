@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import (
@@ -12,12 +12,22 @@ from app.api.deps import (
 )
 from app.models.report import AssessmentReport
 from app.schemas.report import AssessmentReportResponse, AssessmentReportSummaryResponse
-from app.services.rate_limit import ACTION_REPORT_GENERATE, enforce_rate_limit
+from app.services.rate_limit import (
+    ACTION_REPORT_GENERATE,
+    ACTION_REPORT_PDF_EXPORT,
+    enforce_rate_limit,
+)
 from app.services.reports.generate import (
     generate_assessment_report,
     get_assessment_report_or_404,
     list_assessment_reports,
     list_operation_assessment_reports,
+)
+from app.services.reports.pdf import (
+    PdfRendererUnavailable,
+    PdfSnapshotError,
+    export_assessment_report_pdf,
+    pdf_http_error,
 )
 from app.services.reports.summary import HEADLINE_LABELS
 
@@ -119,3 +129,47 @@ def get_report_endpoint(
 ) -> AssessmentReportResponse:
     report = get_assessment_report_or_404(db, report_id=report_id, user_id=auth.user.id)
     return _full_response(report)
+
+
+@router.get("/{report_id}/pdf")
+def export_report_pdf_endpoint(
+    report_id: UUID,
+    auth: Annotated[AuthContext, Depends(get_auth_context)],
+    db: Annotated[Session, Depends(get_db)],
+) -> Response:
+    """On-demand PDF of an existing immutable snapshot.
+
+    Isolation order: authenticate → membership-scoped get-or-404 → rate limit
+    using the authorized organization/user → validate/render. Cross-org IDs
+    stay 404 and never increment ``report.pdf_export``.
+
+    Sync ``def`` so FastAPI runs rendering in the threadpool and does not
+    block the event loop. The PDF is fully built in memory before this
+    response is constructed.
+    """
+    report = get_assessment_report_or_404(db, report_id=report_id, user_id=auth.user.id)
+    enforce_rate_limit(
+        db,
+        organization_id=report.organization_id,
+        user_id=auth.user.id,
+        action=ACTION_REPORT_PDF_EXPORT,
+    )
+    try:
+        pdf_bytes, filename = export_assessment_report_pdf(report)
+    except PdfRendererUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="PDF export is unavailable",
+        ) from exc
+    except PdfSnapshotError as exc:
+        raise pdf_http_error(exc) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred",
+        ) from exc
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
