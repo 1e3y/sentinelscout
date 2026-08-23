@@ -11,8 +11,10 @@ limit, FastAPI sync-threadpool offload, and infrastructure request timeouts.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+import unicodedata
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -24,16 +26,35 @@ from app.models.report import REPORT_SCHEMA_VERSION, AssessmentReport
 from app.services.reports.snapshot import canonical_json, content_digest
 from app.services.reports.summary import HEADLINE_LABELS
 
-PDF_RENDERER_VERSION = 1
+PDF_RENDERER_VERSION = 2
 SUPPORTED_REPORT_SCHEMA_VERSION = REPORT_SCHEMA_VERSION
 MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024
 MAX_FINDINGS = 200
 MAX_FILENAME_STEM = 80
 
-_FONT_REGULAR = "ScoutVera"
-_FONT_BOLD = "ScoutVera-Bold"
+_FONT_DIR = Path(__file__).resolve().parents[2] / "assets" / "fonts"
+FONT_FILE = _FONT_DIR / "NotoSansKR-VF.ttf"
+FONT_SOURCE_FILE = _FONT_DIR / "SOURCE.txt"
+_FONT_NAME = "ScoutNotoKR"
 
 _PDF_MAGIC = b"%PDF-"
+_ALLOWED_WHITESPACE = frozenset("\t\n\r ")
+_COMMON_PUNCTUATION = frozenset(
+    {
+        "\u2010",  # hyphen
+        "\u2011",  # non-breaking hyphen
+        "\u2012",  # figure dash
+        "\u2013",  # en dash
+        "\u2014",  # em dash
+        "\u2018",
+        "\u2019",
+        "\u201c",
+        "\u201d",
+        "\u2026",
+    }
+)
+_FORBIDDEN_FORMAT_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Co", "Cn"})
+_COMBINING_CATEGORIES = frozenset({"Mn", "Mc", "Me"})
 
 _FILENAME_SAFE = re.compile(r"[^a-z0-9._-]+")
 
@@ -51,14 +72,43 @@ class PdfSnapshotError(ValueError):
         self.status_code = status_code
 
 
+def normalize_pdf_text(value: Any) -> str:
+    """NFC normalize for rendering only. Never write this back to the snapshot."""
+    return unicodedata.normalize("NFC", "" if value is None else str(value))
+
+
+def is_supported_pdf_char(char: str) -> bool:
+    """Explicit M24 rendering boundary. Glyph presence is checked separately.
+
+    Combining marks are not a supported family. NFC may compose them away
+    first; any mark that remains after NFC is rejected.
+    """
+    if unicodedata.category(char) in _COMBINING_CATEGORIES:
+        return False
+    if char in _ALLOWED_WHITESPACE or char in _COMMON_PUNCTUATION:
+        return True
+    code = ord(char)
+    if 0x20 <= code <= 0x7E:
+        return True
+    if 0x00A0 <= code <= 0x00FF:
+        return True
+    if 0x0100 <= code <= 0x017F:
+        return True
+    if 0x1E00 <= code <= 0x1EFF:
+        return True
+    if 0xAC00 <= code <= 0xD7A3:
+        return True
+    return False
+
+
 def plain_pdf_text(value: Any) -> str:
     """Single escape path for ReportLab Paragraph mini-markup.
 
     Snapshot strings are data, not markup. Every untrusted string that enters a
     Paragraph must go through this helper. Newlines become trusted ``<br/>``
-    only after metacharacters are escaped.
+    only after metacharacters are escaped. NFC is applied for display only.
     """
-    text = "" if value is None else str(value)
+    text = normalize_pdf_text(value)
     escaped = escape(text, {'"': "&quot;", "'": "&#39;"})
     return escaped.replace("\n", "<br/>")
 
@@ -136,15 +186,16 @@ def _load_reportlab() -> dict[str, Any]:
     }
 
 
-def _vera_paths() -> tuple[str, str]:
-    import reportlab
-
-    fonts = Path(reportlab.__file__).parent / "fonts"
-    regular = fonts / "Vera.ttf"
-    bold = fonts / "VeraBd.ttf"
-    if not regular.is_file() or not bold.is_file():
-        raise PdfRendererUnavailable("ReportLab Vera fonts are not available")
-    return str(regular), str(bold)
+def expected_font_sha256() -> str:
+    if not FONT_SOURCE_FILE.is_file():
+        raise PdfRendererUnavailable("PDF font metadata is not available")
+    for line in FONT_SOURCE_FILE.read_text(encoding="utf-8").splitlines():
+        key, _, value = line.partition(":")
+        if key.strip().lower() == "sha256":
+            digest = value.strip().lower()
+            if len(digest) == 64 and all(part in "0123456789abcdef" for part in digest):
+                return digest
+    raise PdfRendererUnavailable("PDF font metadata is not available")
 
 
 _FONTS_REGISTERED = False
@@ -154,16 +205,26 @@ def _ensure_fonts(rl: dict[str, Any]) -> None:
     global _FONTS_REGISTERED
     if _FONTS_REGISTERED:
         return
-    regular, bold = _vera_paths()
-    rl["pdfmetrics"].registerFont(rl["TTFont"](_FONT_REGULAR, regular))
-    rl["pdfmetrics"].registerFont(rl["TTFont"](_FONT_BOLD, bold))
+    if not FONT_FILE.is_file():
+        raise PdfRendererUnavailable("PDF export font is not available")
+    try:
+        expected = expected_font_sha256()
+        actual = hashlib.sha256(FONT_FILE.read_bytes()).hexdigest()
+    except PdfRendererUnavailable:
+        raise
+    except OSError as exc:
+        raise PdfRendererUnavailable("PDF export font is not available") from exc
+    if actual != expected:
+        raise PdfRendererUnavailable("PDF export font is not available")
+    try:
+        rl["pdfmetrics"].registerFont(rl["TTFont"](_FONT_NAME, str(FONT_FILE)))
+    except Exception as exc:
+        raise PdfRendererUnavailable("PDF export font is not available") from exc
     _FONTS_REGISTERED = True
 
 
-def _glyph_missing(rl: dict[str, Any], font_name: str, char: str) -> bool:
-    if not char or char in "\n\r\t ":
-        return False
-    font = rl["pdfmetrics"].getFont(font_name)
+def _glyph_missing(rl: dict[str, Any], char: str) -> bool:
+    font = rl["pdfmetrics"].getFont(_FONT_NAME)
     face = getattr(font, "face", None)
     mapping = getattr(face, "charToGlyph", None)
     if mapping is None:
@@ -173,22 +234,21 @@ def _glyph_missing(rl: dict[str, Any], font_name: str, char: str) -> bool:
 
 
 def _assert_fonts_cover(rl: dict[str, Any], texts: list[str]) -> None:
-    """Fail closed rather than drop Hangul / other unsupported glyphs."""
-    missing: list[str] = []
+    """Fail closed unless the character is in the M24 boundary and has a glyph."""
     seen: set[str] = set()
     for text in texts:
-        for char in text:
+        normalized = normalize_pdf_text(text)
+        for char in normalized:
             if char in seen:
                 continue
             seen.add(char)
-            if _glyph_missing(rl, _FONT_REGULAR, char):
-                missing.append(char)
-            if len(missing) >= 8:
-                break
-        if len(missing) >= 8:
-            break
-    if missing:
-        raise _conflict("Report contains characters that cannot be exported")
+            if char in _ALLOWED_WHITESPACE:
+                continue
+            category = unicodedata.category(char)
+            if category in _FORBIDDEN_FORMAT_CATEGORIES or category in _COMBINING_CATEGORIES:
+                raise _conflict("Report contains characters that cannot be exported")
+            if not is_supported_pdf_char(char) or _glyph_missing(rl, char):
+                raise _conflict("Report contains characters that cannot be exported")
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -290,7 +350,7 @@ def _styles(rl: dict[str, Any]) -> dict[str, Any]:
     return {
         "kicker": ParagraphStyle(
             "kicker",
-            fontName=_FONT_REGULAR,
+            fontName=_FONT_NAME,
             fontSize=8,
             leading=11,
             alignment=rl["TA_LEFT"],
@@ -299,7 +359,7 @@ def _styles(rl: dict[str, Any]) -> dict[str, Any]:
         ),
         "title": ParagraphStyle(
             "title",
-            fontName=_FONT_BOLD,
+            fontName=_FONT_NAME,
             fontSize=18,
             leading=22,
             textColor=colors.HexColor("#18181b"),
@@ -307,7 +367,7 @@ def _styles(rl: dict[str, Any]) -> dict[str, Any]:
         ),
         "h1": ParagraphStyle(
             "h1",
-            fontName=_FONT_BOLD,
+            fontName=_FONT_NAME,
             fontSize=13,
             leading=16,
             spaceBefore=14,
@@ -316,7 +376,7 @@ def _styles(rl: dict[str, Any]) -> dict[str, Any]:
         ),
         "h2": ParagraphStyle(
             "h2",
-            fontName=_FONT_BOLD,
+            fontName=_FONT_NAME,
             fontSize=11,
             leading=14,
             spaceBefore=8,
@@ -325,7 +385,7 @@ def _styles(rl: dict[str, Any]) -> dict[str, Any]:
         ),
         "body": ParagraphStyle(
             "body",
-            fontName=_FONT_REGULAR,
+            fontName=_FONT_NAME,
             fontSize=9,
             leading=12,
             alignment=rl["TA_LEFT"],
@@ -333,7 +393,7 @@ def _styles(rl: dict[str, Any]) -> dict[str, Any]:
         ),
         "small": ParagraphStyle(
             "small",
-            fontName=_FONT_REGULAR,
+            fontName=_FONT_NAME,
             fontSize=8,
             leading=11,
             alignment=rl["TA_LEFT"],
@@ -342,7 +402,7 @@ def _styles(rl: dict[str, Any]) -> dict[str, Any]:
         ),
         "banner": ParagraphStyle(
             "banner",
-            fontName=_FONT_BOLD,
+            fontName=_FONT_NAME,
             fontSize=11,
             leading=14,
             alignment=rl["TA_CENTER"],
@@ -350,14 +410,14 @@ def _styles(rl: dict[str, Any]) -> dict[str, Any]:
         ),
         "banner_body": ParagraphStyle(
             "banner_body",
-            fontName=_FONT_REGULAR,
+            fontName=_FONT_NAME,
             fontSize=9,
             leading=12,
             alignment=rl["TA_CENTER"],
         ),
         "label": ParagraphStyle(
             "label",
-            fontName=_FONT_REGULAR,
+            fontName=_FONT_NAME,
             fontSize=7,
             leading=9,
             alignment=rl["TA_LEFT"],
@@ -366,7 +426,7 @@ def _styles(rl: dict[str, Any]) -> dict[str, Any]:
         ),
         "finding_title": ParagraphStyle(
             "finding_title",
-            fontName=_FONT_BOLD,
+            fontName=_FONT_NAME,
             fontSize=10,
             leading=13,
             spaceAfter=4,
@@ -374,7 +434,7 @@ def _styles(rl: dict[str, Any]) -> dict[str, Any]:
         ),
         "footer": ParagraphStyle(
             "footer",
-            fontName=_FONT_REGULAR,
+            fontName=_FONT_NAME,
             fontSize=7,
             leading=9,
             alignment=rl["TA_LEFT"],

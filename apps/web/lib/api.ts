@@ -1085,8 +1085,28 @@ export async function exportAssessmentReportPdf(
     cache: "no-store",
   });
   if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(`API ${path} failed (${response.status}): ${detail}`);
+    if (response.status === 409) {
+      let unsupportedCharacters = false;
+      try {
+        const payload = (await response.json()) as {
+          error?: { message?: string };
+        };
+        unsupportedCharacters =
+          payload.error?.message ===
+          "Report contains characters that cannot be exported";
+      } catch {
+        unsupportedCharacters = false;
+      }
+      throw new Error(
+        unsupportedCharacters
+          ? "This report contains characters that the PDF exporter cannot render yet."
+          : "This report cannot be exported.",
+      );
+    }
+    if (response.status === 503) {
+      throw new Error("PDF export is unavailable");
+    }
+    throw new Error(`Failed to export PDF (${response.status})`);
   }
   return {
     blob: await response.blob(),

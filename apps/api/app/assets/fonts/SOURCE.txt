@@ -1,0 +1,10 @@
+family: Noto Sans KR
+upstream_project: notofonts/noto-cjk
+upstream_tag: Sans2.004
+upstream_repository_path: Sans/Variable/TTF/Subset/NotoSansKR-VF.ttf
+byte_size: 10415420
+sha256: 9e1d729e7e2b36f9ef439da102f8c134c10aabe46f1c843bf0aca5c043b86f76
+source_url: https://raw.githubusercontent.com/notofonts/noto-cjk/Sans2.004/Sans/Variable/TTF/Subset/NotoSansKR-VF.ttf
+license: SIL Open Font License 1.1
+license_file: OFL.txt
+notes: Official Korean-subset variable TrueType. ReportLab 5.0.1 TTFont loads this file directly. Do not substitute the CFF SubsetOTF Regular.

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import ast
 import copy
+import hashlib
 import inspect
 import json
 import re
+import unicodedata
 from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
@@ -19,10 +21,15 @@ from app.models.audit import AuditEvent
 from app.models.report import AssessmentReport
 from app.services.rate_limit import ACTION_REPORT_PDF_EXPORT
 from app.services.reports.pdf import (
+    FONT_FILE,
+    FONT_SOURCE_FILE,
     MAX_FINDINGS,
     MAX_SNAPSHOT_BYTES,
     PDF_RENDERER_VERSION,
     PdfRendererUnavailable,
+    expected_font_sha256,
+    is_supported_pdf_char,
+    normalize_pdf_text,
     plain_pdf_text,
     sanitize_pdf_filename,
     snapshot_utf8_size,
@@ -92,6 +99,37 @@ def _mutate_content(db_session, report_id: str, mutator, *, update_digest: bool)
 
 
 # ---------------------------------------------------------------- unit helpers
+
+
+def test_vendored_font_matches_source_metadata():
+    assert FONT_FILE.is_file()
+    assert FONT_SOURCE_FILE.is_file()
+    actual = hashlib.sha256(FONT_FILE.read_bytes()).hexdigest()
+    assert actual == expected_font_sha256()
+    assert FONT_FILE.stat().st_size == 10_415_420
+    assert actual == "9e1d729e7e2b36f9ef439da102f8c134c10aabe46f1c843bf0aca5c043b86f76"
+
+
+def test_m24_support_boundary_is_explicit():
+    assert is_supported_pdf_char("A")
+    assert is_supported_pdf_char("é")
+    assert is_supported_pdf_char("–")
+    assert is_supported_pdf_char("—")
+    assert is_supported_pdf_char("테")
+    assert not is_supported_pdf_char("\u0301")
+    assert not is_supported_pdf_char("中")
+    assert not is_supported_pdf_char("漢")
+    assert not is_supported_pdf_char("ا")
+    assert not is_supported_pdf_char("प")
+    assert not is_supported_pdf_char("😀")
+    assert not is_supported_pdf_char("\x01")
+
+
+def test_nfc_normalization_is_display_only():
+    assert normalize_pdf_text("Cafe\u0301") == "Café"
+    assert normalize_pdf_text(unicodedata.normalize("NFD", "테스트")) == "테스트"
+    assert normalize_pdf_text("x\u0301") == "x\u0301"
+    assert "&eacute;" not in plain_pdf_text("Café")
 
 
 def test_plain_pdf_text_is_the_only_escape_path():
@@ -180,7 +218,7 @@ def test_member_can_export_pdf_without_active_org_switch(
     assert "pdf-member.example" in text
     assert f"v{report['report_version']}" in text
     assert report["snapshot"]["envelope"]["generated_at"] in text
-    assert "Scout PDF renderer 1" in text
+    assert "Scout PDF renderer 2" in text
     assert "Assessment Incomplete" not in text
 
 
@@ -386,7 +424,7 @@ def test_too_many_findings_is_413(
 # ------------------------------------------------------------- unicode / markup
 
 
-def test_latin_unicode_renders_and_hangul_fails_closed(
+def test_supported_unicode_and_nfc_forms_export(
     client, make_token, seed_user_a, dns_resolver, engine, db_session
 ):
     user_id, org_id = seed_user_a
@@ -401,19 +439,171 @@ def test_latin_unicode_renders_and_hangul_fails_closed(
         snapshot["content"]["identity"]["organization_name"] = "Café – résumé"
 
     _mutate_content(db_session, report_id, _latin, update_digest=True)
-    ok = _pdf(client, token, report_id)
-    assert ok.status_code == 200, ok.text
-    extracted = _pdf_text(ok.content)
-    assert "Café – résumé" in extracted
+    latin = _pdf(client, token, report_id)
+    assert latin.status_code == 200, latin.text
+    assert "Café – résumé" in _pdf_text(latin.content)
 
     def _hangul(snapshot):
         snapshot["content"]["identity"]["organization_name"] = "테스트"
 
     _mutate_content(db_session, report_id, _hangul, update_digest=True)
-    blocked = _pdf(client, token, report_id)
-    assert blocked.status_code == 409
-    assert "cannot be exported" in blocked.json()["error"]["message"]
-    assert not blocked.content.startswith(b"%PDF-")
+    hangul = _pdf(client, token, report_id)
+    assert hangul.status_code == 200, hangul.text
+    assert "테스트" in _pdf_text(hangul.content)
+
+    def _mixed(snapshot):
+        snapshot["content"]["identity"]["organization_name"] = "Scout 테스트 — Café"
+
+    _mutate_content(db_session, report_id, _mixed, update_digest=True)
+    mixed = _pdf(client, token, report_id)
+    assert mixed.status_code == 200, mixed.text
+    assert "Scout 테스트 — Café" in _pdf_text(mixed.content)
+
+
+def _pdf_with_org_name(client, token, db_session, report_id: str, value: str):
+    def _inject(snapshot, name=value):
+        snapshot["content"]["identity"]["organization_name"] = name
+
+    _mutate_content(db_session, report_id, _inject, update_digest=True)
+    return _pdf(client, token, report_id)
+
+
+def test_decomposed_latin_accent_exports_after_nfc(
+    client, make_token, seed_user_a, dns_resolver, engine, db_session
+):
+    user_id, org_id = seed_user_a
+    token = make_token(sub=user_id, org_id=org_id, org_role="org:admin")
+    report_id = _generate(
+        client,
+        token,
+        _clean_completed_operation(client, token, dns_resolver, engine, "pdf-nfc-latin.example"),
+    ).json()["id"]
+    stored_form = "Cafe\u0301"
+    assert stored_form != unicodedata.normalize("NFC", stored_form)
+    response = _pdf_with_org_name(client, token, db_session, report_id, stored_form)
+    row = _load_report(db_session, report_id)
+    assert row.snapshot_json["content"]["identity"]["organization_name"] == stored_form
+    assert response.status_code == 200, response.text
+    extracted = unicodedata.normalize("NFC", _pdf_text(response.content))
+    assert "Café" in extracted
+
+
+def test_decomposed_hangul_exports_after_nfc(
+    client, make_token, seed_user_a, dns_resolver, engine, db_session
+):
+    user_id, org_id = seed_user_a
+    token = make_token(sub=user_id, org_id=org_id, org_role="org:admin")
+    report_id = _generate(
+        client,
+        token,
+        _clean_completed_operation(client, token, dns_resolver, engine, "pdf-nfc-hangul.example"),
+    ).json()["id"]
+    stored_form = unicodedata.normalize("NFD", "테스트")
+    assert stored_form != "테스트"
+    assert unicodedata.normalize("NFC", stored_form) == "테스트"
+    response = _pdf_with_org_name(client, token, db_session, report_id, stored_form)
+    row = _load_report(db_session, report_id)
+    assert row.snapshot_json["content"]["identity"]["organization_name"] == stored_form
+    assert response.status_code == 200, response.text
+    extracted = unicodedata.normalize("NFC", _pdf_text(response.content))
+    assert "테스트" in extracted
+
+
+def test_remaining_combining_mark_after_nfc_is_409(
+    client, make_token, seed_user_a, dns_resolver, engine, db_session
+):
+    user_id, org_id = seed_user_a
+    token = make_token(sub=user_id, org_id=org_id, org_role="org:admin")
+    report_id = _generate(
+        client,
+        token,
+        _clean_completed_operation(client, token, dns_resolver, engine, "pdf-nfc-mark.example"),
+    ).json()["id"]
+    leftover = "x\u0301"
+    assert unicodedata.normalize("NFC", leftover) == leftover
+    assert any(unicodedata.category(char) == "Mn" for char in leftover)
+    response = _pdf_with_org_name(client, token, db_session, report_id, leftover)
+    assert response.status_code == 409, response.text
+    assert (
+        response.json()["error"]["message"]
+        == "Report contains characters that cannot be exported"
+    )
+    assert not response.content.startswith(b"%PDF-")
+    assert b"%PDF-" not in response.content
+
+
+def _embedded_truetype_stream_sizes(data: bytes) -> list[int]:
+    reader = PdfReader(BytesIO(data))
+    sizes: list[int] = []
+
+    def _walk(obj, seen: set[int]) -> None:
+        if hasattr(obj, "get_object"):
+            ident = id(obj)
+            if ident in seen:
+                return
+            seen.add(ident)
+            obj = obj.get_object()
+        if isinstance(obj, dict):
+            if "/FontFile2" in obj:
+                stream = obj["/FontFile2"]
+                if hasattr(stream, "get_object"):
+                    stream = stream.get_object()
+                payload = stream.get_data() if hasattr(stream, "get_data") else bytes(stream)
+                sizes.append(len(payload))
+            for value in obj.values():
+                _walk(value, seen)
+        elif isinstance(obj, list):
+            for value in obj:
+                _walk(value, seen)
+
+    for page in reader.pages:
+        _walk(page.get("/Resources"), set())
+    return sizes
+
+
+def test_pdf_embeds_subset_of_vendored_font(
+    client, make_token, seed_user_a, dns_resolver, engine
+):
+    user_id, org_id = seed_user_a
+    token = make_token(sub=user_id, org_id=org_id, org_role="org:admin")
+    report_id = _generate(
+        client,
+        token,
+        _clean_completed_operation(client, token, dns_resolver, engine, "pdf-embed.example"),
+    ).json()["id"]
+    response = _pdf(client, token, report_id)
+    assert response.status_code == 200, response.text
+    assert b"/FontFile2" in response.content
+    sizes = _embedded_truetype_stream_sizes(response.content)
+    assert sizes
+    assert max(sizes) < FONT_FILE.stat().st_size // 4
+    assert max(sizes) < 1_500_000
+
+
+def test_unsupported_scripts_fail_closed(
+    client, make_token, seed_user_a, dns_resolver, engine, db_session
+):
+    user_id, org_id = seed_user_a
+    token = make_token(sub=user_id, org_id=org_id, org_role="org:admin")
+    report_id = _generate(
+        client,
+        token,
+        _clean_completed_operation(client, token, dns_resolver, engine, "pdf-reject.example"),
+    ).json()["id"]
+    samples = ("😀", "السلام", "परीक्षण", "中")
+    for sample in samples:
+        def _inject(snapshot, value=sample):
+            snapshot["content"]["identity"]["organization_name"] = value
+
+        _mutate_content(db_session, report_id, _inject, update_digest=True)
+        response = _pdf(client, token, report_id)
+        assert response.status_code == 409, (sample, response.text)
+        assert (
+            response.json()["error"]["message"]
+            == "Report contains characters that cannot be exported"
+        )
+        assert not response.content.startswith(b"%PDF-")
+        assert b"%PDF-" not in response.content
 
 
 def test_reportlab_markup_is_literal_text_and_causes_no_network(
@@ -641,6 +831,28 @@ def test_renderer_unavailable_is_503_and_core_api_stays_up(
     assert client.get("/v1/operations", headers=_auth(token)).status_code == 200
 
 
+def test_font_checksum_mismatch_is_503_only_on_pdf(
+    client, make_token, seed_user_a, dns_resolver, engine, monkeypatch
+):
+    import app.services.reports.pdf as pdf_mod
+
+    user_id, org_id = seed_user_a
+    token = make_token(sub=user_id, org_id=org_id, org_role="org:admin")
+    report_id = _generate(
+        client,
+        token,
+        _clean_completed_operation(client, token, dns_resolver, engine, "pdf-hash.example"),
+    ).json()["id"]
+    pdf_mod._FONTS_REGISTERED = False
+    monkeypatch.setattr(pdf_mod, "expected_font_sha256", lambda: "0" * 64)
+    response = _pdf(client, token, report_id)
+    assert response.status_code == 503
+    assert response.json()["error"]["message"] == "PDF export is unavailable"
+    assert not response.content.startswith(b"%PDF-")
+    assert client.get("/ready").json()["status"] == "ready"
+    pdf_mod._FONTS_REGISTERED = False
+
+
 def test_render_exception_cannot_return_a_partial_pdf(
     client, make_token, seed_user_a, dns_resolver, engine, monkeypatch
 ):
@@ -682,5 +894,20 @@ def test_pdf_write_verbs_are_not_exposed(
 
 
 def test_renderer_version_and_action_constants():
-    assert PDF_RENDERER_VERSION == 1
+    assert PDF_RENDERER_VERSION == 2
     assert ACTION_REPORT_PDF_EXPORT == "report.pdf_export"
+
+
+def test_frontend_surfaces_safe_unsupported_pdf_message():
+    web_root = Path(__file__).resolve().parents[2] / "web"
+    api = (web_root / "lib/api.ts").read_text(encoding="utf-8")
+    button = (
+        web_root / "app/dashboard/reports/[reportId]/export-pdf-button.tsx"
+    ).read_text(encoding="utf-8")
+    assert "This report contains characters that the PDF exporter cannot render yet." in api
+    assert "This report cannot be exported." in api
+    assert "PDF export is unavailable" in api
+    assert "exportAssessmentReportPdf" in button
+    assert "NotoSansKR" not in api
+    assert "reportlab" not in api.lower()
+    assert "U+" not in api
