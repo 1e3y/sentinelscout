@@ -15,6 +15,7 @@ from app.api.routes import (
     operations,
     organizations,
     reports,
+    shared_reports,
     targets,
 )
 from app.core.config import get_settings
@@ -75,6 +76,8 @@ def create_app(
     app.include_router(audit.router)
     app.include_router(reports.operation_router)
     app.include_router(reports.router)
+    app.include_router(reports.share_admin_router)
+    app.include_router(shared_reports.router)
     return app
 
 

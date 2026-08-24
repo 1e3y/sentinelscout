@@ -59,3 +59,31 @@ def test_required_security_headers_exist_in_web_config():
         assert name in text
     assert "clerk.accounts.dev" in text
     assert "unsafe-inline" in text
+    assert "buildShareContentSecurityPolicy" in text
+    share_csp = text.split("export function buildShareContentSecurityPolicy")[1].split(
+        "export const SHARE_SECURITY_HEADERS"
+    )[0]
+    for required in (
+        "default-src 'self'",
+        "object-src 'none'",
+        "frame-ancestors 'none'",
+        "base-uri 'none'",
+        "form-action 'none'",
+    ):
+        assert required in share_csp
+    assert "clerk.com" not in share_csp
+    assert "clerk.accounts.dev" not in share_csp
+    assert "private, no-store" in text
+    assert "no-referrer" in text
+    assert "noindex, nofollow, noarchive" in text
+
+    config = (
+        Path(__file__).resolve().parents[2] / "web" / "next.config.ts"
+    ).read_text(encoding="utf-8")
+    assert "SHARE_SECURITY_HEADERS" in config
+    assert "/share/:path*" in config
+
+    robots = (Path(__file__).resolve().parents[2] / "web" / "app" / "robots.ts").read_text(
+        encoding="utf-8"
+    )
+    assert 'disallow: "/share/"' in robots

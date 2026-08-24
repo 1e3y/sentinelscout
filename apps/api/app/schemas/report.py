@@ -1,8 +1,11 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+
+ShareExpiresIn = Literal["24h", "7d", "30d"]
+ShareStatus = Literal["active", "expired", "revoked"]
 
 
 class AssessmentReportSummaryResponse(BaseModel):
@@ -34,3 +37,30 @@ class AssessmentReportSummaryResponse(BaseModel):
 
 class AssessmentReportResponse(AssessmentReportSummaryResponse):
     snapshot: dict[str, Any] = Field(default_factory=dict)
+
+
+class CreateReportShareRequest(BaseModel):
+    expires_in: ShareExpiresIn
+
+
+class CreateReportShareResponse(BaseModel):
+    id: UUID
+    expires_at: datetime
+    expires_in: ShareExpiresIn
+    share_url: str
+
+
+class ReportShareListItem(BaseModel):
+    id: UUID
+    report_id: UUID
+    created_by_user_id: UUID
+    created_at: datetime
+    expires_at: datetime
+    revoked_at: datetime | None
+    status: ShareStatus
+
+
+class RevokeReportShareResponse(BaseModel):
+    id: UUID
+    revoked_at: datetime | None
+    status: ShareStatus

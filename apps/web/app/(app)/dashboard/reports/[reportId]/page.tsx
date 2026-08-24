@@ -1,9 +1,10 @@
 import { auth } from "@clerk/nextjs/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { fetchAssessmentReport } from "@/lib/api";
+import { fetchAssessmentReport, fetchMe } from "@/lib/api";
 import { ExportPdfButton } from "./export-pdf-button";
 import { AssessmentReportView } from "./report-view";
+import { ShareReportPanel } from "./share-report-panel";
 
 type Props = {
   params: Promise<{ reportId: string }>;
@@ -22,9 +23,15 @@ export default async function AssessmentReportPage({ params }: Props) {
   }
 
   let report = null;
+  let isAdmin = false;
   let error: string | null = null;
   try {
-    report = await fetchAssessmentReport(token, reportId);
+    const [loaded, me] = await Promise.all([
+      fetchAssessmentReport(token, reportId),
+      fetchMe(token),
+    ]);
+    report = loaded;
+    isAdmin = me.active_organization_role === "admin";
   } catch (err) {
     error = err instanceof Error ? err.message : "Failed to load assessment report";
   }
@@ -46,7 +53,10 @@ export default async function AssessmentReportPage({ params }: Props) {
           Could not load this assessment report. {error}
         </section>
       ) : (
-        <AssessmentReportView report={report} />
+        <>
+          {isAdmin ? <ShareReportPanel reportId={reportId} /> : null}
+          <AssessmentReportView report={report} />
+        </>
       )}
     </div>
   );

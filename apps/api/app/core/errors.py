@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Mapping
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -61,6 +61,15 @@ def _http_code_for_status(status_code: int) -> str:
     return mapping.get(status_code, "http_error")
 
 
+def _shared_report_no_store(
+    request: Request, headers: Mapping[str, str] | None = None
+) -> dict[str, str] | None:
+    merged = dict(headers or {})
+    if request.url.path.startswith("/v1/shared-reports"):
+        merged.setdefault("Cache-Control", "private, no-store")
+    return merged or None
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
@@ -74,7 +83,7 @@ def register_exception_handlers(app: FastAPI) -> None:
                 message=message,
                 request_id=_request_id(request),
             ),
-            headers=getattr(exc, "headers", None),
+            headers=_shared_report_no_store(request, getattr(exc, "headers", None)),
         )
 
     @app.exception_handler(StarletteHTTPException)
@@ -89,6 +98,7 @@ def register_exception_handlers(app: FastAPI) -> None:
                 message=message,
                 request_id=_request_id(request),
             ),
+            headers=_shared_report_no_store(request),
         )
 
     @app.exception_handler(RequestValidationError)
@@ -112,6 +122,7 @@ def register_exception_handlers(app: FastAPI) -> None:
                 request_id=_request_id(request),
                 details=details,
             ),
+            headers=_shared_report_no_store(request),
         )
 
     @app.exception_handler(Exception)
@@ -132,4 +143,5 @@ def register_exception_handlers(app: FastAPI) -> None:
                 message="An unexpected error occurred",
                 request_id=_request_id(request),
             ),
+            headers=_shared_report_no_store(request),
         )

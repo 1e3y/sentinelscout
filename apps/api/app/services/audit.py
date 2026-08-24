@@ -63,6 +63,8 @@ _AUDIT_METADATA_ALLOWLIST = frozenset(
         "assessment_completeness",
         "findings_total",
         "findings_open",
+        "share_id",
+        "expires_at",
     }
 )
 
@@ -85,6 +87,9 @@ _BLOCKED_METADATA_KEYS = frozenset(
         "response_body",
         "chain_of_thought",
         "raw",
+        "share_url",
+        "secret_hash",
+        "fragment",
     }
 )
 

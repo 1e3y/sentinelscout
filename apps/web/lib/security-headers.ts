@@ -56,3 +56,53 @@ export const REQUIRED_SECURITY_HEADER_NAMES = [
   "Referrer-Policy",
   "X-Frame-Options",
 ] as const;
+
+export function buildShareContentSecurityPolicy(nonce?: string): string {
+  const scriptSrc = nonce
+    ? `script-src 'self' 'nonce-${nonce}'`
+    : "script-src 'self'";
+  return [
+    "default-src 'self'",
+    "base-uri 'none'",
+    "object-src 'none'",
+    "frame-ancestors 'none'",
+    "form-action 'none'",
+    scriptSrc,
+    "style-src 'self'",
+    "img-src 'self' data:",
+    "font-src 'self' data:",
+    `connect-src 'self' ${apiBase}`,
+  ].join("; ");
+}
+
+export const shareContentSecurityPolicy = buildShareContentSecurityPolicy();
+
+export const SHARE_SECURITY_HEADERS: { key: string; value: string }[] = [
+  // CSP is applied per-request in middleware so Next Flight scripts can
+  // receive a nonce. The static header set here must not also send CSP:
+  // multiple policies are intersected and would drop the nonce.
+  {
+    key: "Cache-Control",
+    value: "private, no-store",
+  },
+  {
+    key: "Referrer-Policy",
+    value: "no-referrer",
+  },
+  {
+    key: "X-Robots-Tag",
+    value: "noindex, nofollow, noarchive",
+  },
+  {
+    key: "X-Content-Type-Options",
+    value: "nosniff",
+  },
+  {
+    key: "X-Frame-Options",
+    value: "DENY",
+  },
+  {
+    key: "Permissions-Policy",
+    value: "camera=(), microphone=(), geolocation=()",
+  },
+];

@@ -1072,6 +1072,33 @@ function filenameFromContentDisposition(header: string | null): string {
   return name;
 }
 
+export async function createAssessmentReportShare(
+  token: string,
+  reportId: string,
+  expiresIn: "24h" | "7d" | "30d",
+): Promise<import("@/lib/shared-report").CreateReportShareResponse> {
+  return apiFetch(`/v1/reports/${reportId}/shares`, token, {
+    method: "POST",
+    body: JSON.stringify({ expires_in: expiresIn }),
+  });
+}
+
+export async function fetchAssessmentReportShares(
+  token: string,
+  reportId: string,
+): Promise<import("@/lib/shared-report").ReportShareListItem[]> {
+  return apiFetch(`/v1/reports/${reportId}/shares`, token);
+}
+
+export async function revokeAssessmentReportShare(
+  token: string,
+  shareId: string,
+): Promise<void> {
+  await apiFetch(`/v1/report-shares/${shareId}/revoke`, token, {
+    method: "POST",
+  });
+}
+
 export async function exportAssessmentReportPdf(
   token: string,
   reportId: string,

@@ -76,6 +76,11 @@ class Settings(BaseSettings):
     )
     rate_limit_report_generate: int = Field(default=30, alias="RATE_LIMIT_REPORT_GENERATE")
     rate_limit_report_pdf_export: int = Field(default=30, alias="RATE_LIMIT_REPORT_PDF_EXPORT")
+    rate_limit_report_share_create: int = Field(default=30, alias="RATE_LIMIT_REPORT_SHARE_CREATE")
+    rate_limit_shared_report_coarse: int = Field(
+        default=120, alias="RATE_LIMIT_SHARED_REPORT_COARSE"
+    )
+    rate_limit_shared_report_use: int = Field(default=60, alias="RATE_LIMIT_SHARED_REPORT_USE")
     rate_limit_window_seconds: int = Field(default=3600, alias="RATE_LIMIT_WINDOW_SECONDS")
 
     email_delivery_enabled: bool = Field(default=False, alias="EMAIL_DELIVERY_ENABLED")

@@ -1062,7 +1062,7 @@ def test_digested_content_excludes_generation_time_volatility(
 def test_incomplete_report_ui_contract_is_unmissable():
     """Correction 10: incomplete markers exist in the dedicated report view and print CSS."""
     web_root = Path(__file__).resolve().parents[2] / "web"
-    view = (web_root / "app/dashboard/reports/[reportId]/report-view.tsx").read_text(
+    view = (web_root / "app/(app)/dashboard/reports/[reportId]/report-view.tsx").read_text(
         encoding="utf-8"
     )
     css = (web_root / "app/globals.css").read_text(encoding="utf-8")

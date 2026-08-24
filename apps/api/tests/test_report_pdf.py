@@ -902,7 +902,7 @@ def test_frontend_surfaces_safe_unsupported_pdf_message():
     web_root = Path(__file__).resolve().parents[2] / "web"
     api = (web_root / "lib/api.ts").read_text(encoding="utf-8")
     button = (
-        web_root / "app/dashboard/reports/[reportId]/export-pdf-button.tsx"
+        web_root / "app/(app)/dashboard/reports/[reportId]/export-pdf-button.tsx"
     ).read_text(encoding="utf-8")
     assert "This report contains characters that the PDF exporter cannot render yet." in api
     assert "This report cannot be exported." in api
