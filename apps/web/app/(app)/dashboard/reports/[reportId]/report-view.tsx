@@ -4,6 +4,7 @@ import type {
   AssessmentReportFinding,
   AssessmentReportResponse,
 } from "@/lib/api";
+import { generationOriginLabel } from "@/lib/shared-report";
 
 const HEADLINE_TONE: Record<string, string> = {
   assessment_incomplete: "border-amber-300 bg-amber-50 text-amber-900",
@@ -277,6 +278,12 @@ export function AssessmentReportView({ report }: { report: AssessmentReportRespo
         <dl className="grid gap-2 text-sm sm:grid-cols-3">
           <Field label="Organization" value={identity.organization_name} />
           <Field label="Report generated" value={formatTime(envelope.generated_at)} />
+          <Field
+            label="Generation"
+            value={generationOriginLabel(
+              envelope.origin ?? report.generation_origin,
+            )}
+          />
           <Field label="Report version" value={`v${envelope.report_version}`} />
           <Field label="Operation status" value={identity.operation_status} />
           <Field

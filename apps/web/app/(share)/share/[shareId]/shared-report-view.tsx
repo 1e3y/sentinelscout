@@ -1,7 +1,8 @@
-import type {
-  SharedReportChange,
-  SharedReportFinding,
-  SharedReportPublic,
+import {
+  generationOriginLabel,
+  type SharedReportChange,
+  type SharedReportFinding,
+  type SharedReportPublic,
 } from "@/lib/shared-report";
 
 const HEADLINE_TONE: Record<string, string> = {
@@ -237,6 +238,10 @@ export function SharedReportView({ report }: { report: SharedReportPublic }) {
           <Field
             label="Report generated"
             value={formatTime(report.report.generated_at)}
+          />
+          <Field
+            label="Generation"
+            value={generationOriginLabel(report.report.generation_origin)}
           />
           <Field label="Report version" value={`v${report.report.version}`} />
           <Field label="Operation status" value={identity.operation_status} />

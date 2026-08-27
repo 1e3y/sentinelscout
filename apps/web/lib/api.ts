@@ -178,6 +178,7 @@ export type MonitoringConfigurationResponse = {
   organization_id: string;
   target_id: string;
   enabled: boolean;
+  auto_generate_reports: boolean;
   frequency: string;
   next_run_at: string | null;
   last_run_at: string | null;
@@ -344,7 +345,8 @@ export type AssessmentReportSummaryResponse = {
   organization_id: string;
   target_id: string;
   operation_id: string;
-  created_by_user_id: string;
+  created_by_user_id: string | null;
+  generation_origin: "manual" | "scheduled_automatic";
   target_domain: string;
   report_version: number;
   schema_version: number;
@@ -521,7 +523,8 @@ export type AssessmentReportResponse = AssessmentReportSummaryResponse & {
       report_version: number;
       snapshot_digest: string;
       generated_at: string;
-      generated_by: { user_id: string };
+      origin?: "manual" | "scheduled_automatic";
+      generated_by?: { user_id: string };
     };
     content: AssessmentReportContent;
   };
@@ -580,7 +583,11 @@ export function fetchTargetMonitoring(
 export function updateTargetMonitoring(
   token: string,
   targetId: string,
-  body: { enabled: boolean; frequency: "daily" | "weekly" },
+  body: {
+    enabled: boolean;
+    frequency: "daily" | "weekly";
+    auto_generate_reports?: boolean;
+  },
 ): Promise<MonitoringConfigurationResponse> {
   return apiFetch<MonitoringConfigurationResponse>(
     `/v1/targets/${targetId}/monitoring`,

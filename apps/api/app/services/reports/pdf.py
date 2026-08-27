@@ -511,7 +511,21 @@ def _join_evidence(evidence: dict[str, Any]) -> list[str]:
     return lines
 
 
-def _build_story(rl: dict[str, Any], snapshot: dict[str, Any]) -> list[Any]:
+def _generation_label(envelope: dict[str, Any], generation_origin: str | None) -> str:
+    origin = envelope.get("origin") or generation_origin
+    if origin == "scheduled_automatic":
+        return "Automatic after scheduled assessment"
+    if origin == "manual":
+        return "Manual"
+    return "Manual"
+
+
+def _build_story(
+    rl: dict[str, Any],
+    snapshot: dict[str, Any],
+    *,
+    generation_origin: str | None = None,
+) -> list[Any]:
     styles = _styles(rl)
     envelope = _as_dict(snapshot.get("envelope"))
     content = _as_dict(snapshot.get("content"))
@@ -552,6 +566,7 @@ def _build_story(rl: dict[str, Any], snapshot: dict[str, Any]) -> list[Any]:
             _p(rl, summary.get("headline_statement") or "", styles["body"]),
             *_kv(rl, styles, "Organization", identity.get("organization_name")),
             *_kv(rl, styles, "Report generated", generated_at),
+            *_kv(rl, styles, "Generation", _generation_label(envelope, generation_origin)),
             *_kv(rl, styles, "Report version", f"v{envelope.get('report_version')}"),
             *_kv(rl, styles, "Report id", envelope.get("report_id")),
             *_kv(rl, styles, "Operation status", identity.get("operation_status")),
@@ -911,7 +926,9 @@ def _page_footer(rl: dict[str, Any], snapshot: dict[str, Any]):
     return _draw
 
 
-def render_pdf_bytes(snapshot: dict[str, Any]) -> bytes:
+def render_pdf_bytes(
+    snapshot: dict[str, Any], *, generation_origin: str | None = None
+) -> bytes:
     rl = _load_reportlab()
     _ensure_fonts(rl)
     _assert_fonts_cover(rl, _collect_visible_strings(snapshot))
@@ -933,7 +950,11 @@ def render_pdf_bytes(snapshot: dict[str, Any]) -> bytes:
         author="",
     )
     footer = _page_footer(rl, snapshot)
-    doc.build(_build_story(rl, snapshot), onFirstPage=footer, onLaterPages=footer)
+    doc.build(
+        _build_story(rl, snapshot, generation_origin=generation_origin),
+        onFirstPage=footer,
+        onLaterPages=footer,
+    )
     data = buffer.getvalue()
     if not data.startswith(_PDF_MAGIC):
         raise RuntimeError("PDF renderer produced invalid output")
@@ -944,7 +965,9 @@ def export_assessment_report_pdf(report: AssessmentReport) -> tuple[bytes, str]:
     """Validate, render entirely in memory, then return completed PDF bytes."""
     snapshot = validate_snapshot_for_export(report)
     try:
-        pdf_bytes = render_pdf_bytes(snapshot)
+        pdf_bytes = render_pdf_bytes(
+            snapshot, generation_origin=getattr(report, "generation_origin", None)
+        )
     except PdfRendererUnavailable:
         raise
     except PdfSnapshotError:

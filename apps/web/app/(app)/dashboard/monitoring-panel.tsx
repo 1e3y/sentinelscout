@@ -165,6 +165,12 @@ export function MonitoringPanel({ enabled, isAdmin }: Props) {
                   <dd className="capitalize">{monitoring.frequency}</dd>
                 </div>
                 <div>
+                  <dt className="text-zinc-500">Automatic reports</dt>
+                  <dd>
+                    {monitoring.auto_generate_reports ? "Enabled" : "Disabled"}
+                  </dd>
+                </div>
+                <div>
                   <dt className="text-zinc-500">Last assessment</dt>
                   <dd>{formatTime(monitoring.last_run_at)}</dd>
                 </div>
@@ -226,6 +232,54 @@ export function MonitoringPanel({ enabled, isAdmin }: Props) {
                     <option value="daily">Daily</option>
                     <option value="weekly">Weekly</option>
                   </select>
+                </label>
+                <label className="flex max-w-sm items-start gap-2 text-xs text-zinc-600">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={Boolean(monitoring.auto_generate_reports)}
+                    disabled={pending}
+                    onChange={(event) => {
+                      const next = event.target.checked;
+                      startTransition(async () => {
+                        setError(null);
+                        setMessage(null);
+                        try {
+                          const token = await getToken();
+                          if (!token) {
+                            setError("Missing session token");
+                            return;
+                          }
+                          const updated = await updateTargetMonitoring(
+                            token,
+                            selected.id,
+                            {
+                              enabled: monitoring.enabled,
+                              frequency,
+                              auto_generate_reports: next,
+                            },
+                          );
+                          setMonitoring(updated);
+                          setMessage(
+                            next
+                              ? "Automatic reports enabled for successful scheduled runs."
+                              : "Automatic reports disabled.",
+                          );
+                        } catch (err) {
+                          setError(
+                            err instanceof Error
+                              ? err.message
+                              : "Failed to update automatic reports",
+                          );
+                        }
+                      });
+                    }}
+                  />
+                  <span>
+                    Automatically generate assessment reports after successful
+                    scheduled runs. Does not share or email. Reports are
+                    immutable snapshots; members can read them.
+                  </span>
                 </label>
                 <button
                   type="button"

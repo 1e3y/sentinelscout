@@ -51,6 +51,9 @@ def test_verified_target_can_enable_monitoring(
     user_id, org_id = seed_user_a
     token = make_token(sub=user_id, org_id=org_id)
     target_id = _create_verified_target(client, token, "mon-ok.example", dns_resolver)
+    before = client.get(f"/v1/targets/{target_id}/monitoring", headers=_auth(token))
+    assert before.status_code == 200
+    assert before.json()["auto_generate_reports"] is False
     response = client.put(
         f"/v1/targets/{target_id}/monitoring",
         headers=_auth(token),
@@ -60,6 +63,7 @@ def test_verified_target_can_enable_monitoring(
     body = response.json()
     assert body["enabled"] is True
     assert body["frequency"] == "weekly"
+    assert body["auto_generate_reports"] is False
     assert body["next_run_at"] is not None
 
     got = client.get(f"/v1/targets/{target_id}/monitoring", headers=_auth(token))

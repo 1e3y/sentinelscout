@@ -27,6 +27,7 @@ from app.services.candidate_engine import generate_candidates_for_operation
 from app.services.coverage import freeze_operation_coverage
 from app.services.alerts import freeze_operation_alerts
 from app.services.diff import freeze_operation_diff
+from app.services.reports.auto import enqueue_automatic_report_job
 from app.services.discovery.execute import (
     AuthorizationExecutionError,
     StopRequested,
@@ -202,6 +203,7 @@ def _mark_completed(db: Session, operation: Operation) -> Operation:
         },
     )
     _freeze_terminal(db, operation, source="frozen")
+    enqueue_automatic_report_job(db, operation)
     db.commit()
     db.refresh(operation)
     return operation

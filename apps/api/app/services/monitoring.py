@@ -71,6 +71,7 @@ def upsert_monitoring(
     target_id: UUID,
     enabled: bool,
     frequency: str,
+    auto_generate_reports: bool | None = None,
 ) -> MonitoringConfiguration:
     if frequency not in MONITORING_FREQUENCIES:
         raise HTTPException(
@@ -104,11 +105,18 @@ def upsert_monitoring(
         )
     )
     now = datetime.now(timezone.utc)
+    previous_auto = False if config is None else bool(config.auto_generate_reports)
+    if auto_generate_reports is None:
+        resolved_auto = previous_auto
+    else:
+        resolved_auto = bool(auto_generate_reports)
+
     if config is None:
         config = MonitoringConfiguration(
             organization_id=target.organization_id,
             target_id=target.id,
             enabled=enabled,
+            auto_generate_reports=resolved_auto,
             frequency=frequency,
             updated_by_user_id=actor.user_id,
             next_run_at=compute_next_run_at(frequency, from_time=now) if enabled else None,
@@ -117,6 +125,7 @@ def upsert_monitoring(
         db.add(config)
     else:
         config.enabled = enabled
+        config.auto_generate_reports = resolved_auto
         config.frequency = frequency
         config.updated_by_user_id = actor.user_id
         config.updated_at = now
@@ -147,11 +156,39 @@ def upsert_monitoring(
                 "target_id": str(target.id),
                 "domain": target.domain,
                 "enabled": enabled,
+                "auto_generate_reports": resolved_auto,
                 "frequency": frequency,
                 "status": "enabled" if enabled else "disabled",
             },
         ),
     )
+    if previous_auto != resolved_auto:
+        auto_action = (
+            "monitoring.auto_reports_enabled"
+            if resolved_auto
+            else "monitoring.auto_reports_disabled"
+        )
+        record_audit(
+            db,
+            organization_id=target.organization_id,
+            actor_type="user",
+            actor_user_id=actor.user_id,
+            action=auto_action,
+            resource_type="monitoring",
+            resource_id=config.id,
+            summary=(
+                f"Automatic assessment reports "
+                f"{'enabled' if resolved_auto else 'disabled'} for {target.domain}."
+            ),
+            metadata=merge_auth_audit(
+                actor,
+                {
+                    "target_id": str(target.id),
+                    "domain": target.domain,
+                    "auto_generate_reports": resolved_auto,
+                },
+            ),
+        )
     db.commit()
     db.refresh(config)
     return config

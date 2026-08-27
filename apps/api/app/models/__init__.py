@@ -21,6 +21,7 @@ from app.models.operation_controls import OperationControlSnapshot
 from app.models.organization import Organization, OrganizationMembership
 from app.models.rate_limit import RateLimitCounter
 from app.models.report import AssessmentReport
+from app.models.report_generation_job import AssessmentReportGenerationJob
 from app.models.report_share import AnonymousRateLimitCounter, AssessmentReportShare
 from app.models.retest import RetestAttempt
 from app.models.target import AuthorizedTarget, TargetAuthorization, TargetScope
@@ -56,6 +57,7 @@ __all__ = [
     "OrganizationNotificationSettings",
     "OrganizationEmailRecipient",
     "AssessmentReport",
+    "AssessmentReportGenerationJob",
     "AssessmentReportShare",
     "AnonymousRateLimitCounter",
 ]

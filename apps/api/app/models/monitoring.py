@@ -52,6 +52,7 @@ class MonitoringConfiguration(Base):
         index=True,
     )
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    auto_generate_reports: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     frequency: Mapped[str] = mapped_column(String(32), nullable=False, default="weekly")
     next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

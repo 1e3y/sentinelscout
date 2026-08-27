@@ -14,6 +14,7 @@ from app.core.db import engine
 from app.core.logging import bind_log_context, clear_log_context, configure_logging
 from app.services.discovery.runner import SubprocessDiscoveryTools
 from app.services.retest_runtime import process_one_retest
+from app.services.reports.auto import process_one_automatic_report
 from app.services.validation_engine.http import HttpxSafeHttpClient
 from app.services.validation_runtime import process_one_validation
 from app.services.worker_runtime import process_one_operation
@@ -77,7 +78,27 @@ def main() -> None:
                 clear_log_context()
                 bind_log_context(worker="worker")
                 worked = True
-            else:
+
+            auto = process_one_automatic_report(session_factory)
+            if auto is not None:
+                bind_log_context(
+                    operation_id=str(auto.operation_id),
+                    organization_id=str(auto.organization_id),
+                )
+                logger.info(
+                    "processed automatic report job",
+                    extra={
+                        "event": "worker.automatic_report_processed",
+                        "status": auto.status,
+                        "job_id": str(auto.id),
+                        "operation_id": str(auto.operation_id),
+                    },
+                )
+                clear_log_context()
+                bind_log_context(worker="worker")
+                worked = True
+
+            if not worked:
                 attempt = process_one_validation(session_factory, http_client=http_client)
                 if attempt is not None:
                     bind_log_context(

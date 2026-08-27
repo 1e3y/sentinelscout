@@ -36,6 +36,13 @@ export type SharedReportChange = {
   after?: string | number | boolean;
 };
 
+export function generationOriginLabel(origin?: string | null): string {
+  if (origin === "scheduled_automatic") {
+    return "Automatic (scheduled)";
+  }
+  return "Manual";
+}
+
 export type SharedReportPublic = {
   report: {
     id: string;
@@ -43,6 +50,7 @@ export type SharedReportPublic = {
     generated_at: string;
     snapshot_digest: string;
     assessment_completeness: string;
+    generation_origin?: "manual" | "scheduled_automatic";
   };
   identity: {
     organization_name?: string;

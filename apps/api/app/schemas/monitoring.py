@@ -8,6 +8,10 @@ from pydantic import BaseModel, ConfigDict, Field
 class UpsertMonitoringRequest(BaseModel):
     enabled: bool
     frequency: str = Field(pattern="^(daily|weekly)$")
+    # None means omitted: preserve the persisted value (or false when creating).
+    # Do not default to False — that would silently disable auto reports for
+    # older clients that only send enabled + frequency.
+    auto_generate_reports: bool | None = None
 
 
 class MonitoringConfigurationResponse(BaseModel):
@@ -17,6 +21,7 @@ class MonitoringConfigurationResponse(BaseModel):
     organization_id: UUID
     target_id: UUID
     enabled: bool
+    auto_generate_reports: bool = False
     frequency: str
     next_run_at: datetime | None = None
     last_run_at: datetime | None = None

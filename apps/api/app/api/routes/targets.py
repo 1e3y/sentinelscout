@@ -245,6 +245,7 @@ def _to_monitoring_response(config, *, target_id: UUID, organization_id: UUID, c
             organization_id=organization_id,
             target_id=target_id,
             enabled=False,
+            auto_generate_reports=False,
             frequency="weekly",
             next_run_at=None,
             last_run_at=None,
@@ -258,6 +259,7 @@ def _to_monitoring_response(config, *, target_id: UUID, organization_id: UUID, c
         organization_id=config.organization_id,
         target_id=config.target_id,
         enabled=bool(config.enabled),
+        auto_generate_reports=bool(config.auto_generate_reports),
         frequency=config.frequency,
         next_run_at=config.next_run_at,
         last_run_at=config.last_run_at,
@@ -308,6 +310,7 @@ def upsert_monitoring_endpoint(
         target_id=target_id,
         enabled=body.enabled,
         frequency=body.frequency,
+        auto_generate_reports=body.auto_generate_reports,
     )
     changes = latest_change_counts(db, target_id=config.target_id)
     return _to_monitoring_response(

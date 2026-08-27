@@ -7,6 +7,7 @@ import {
   fetchAssessmentReports,
   type AssessmentReportSummaryResponse,
 } from "@/lib/api";
+import { generationOriginLabel } from "@/lib/shared-report";
 
 type Props = {
   enabled: boolean;
@@ -84,6 +85,9 @@ export function ReportsPanel({ enabled }: Props) {
                 <span className="font-medium">{report.target_domain}</span>
                 <span className="rounded border border-zinc-300 px-2 py-0.5 text-xs text-zinc-700">
                   v{report.report_version}
+                </span>
+                <span className="rounded border border-zinc-300 px-2 py-0.5 text-xs text-zinc-700">
+                  {generationOriginLabel(report.generation_origin)}
                 </span>
                 <span
                   className={`rounded border px-2 py-0.5 text-xs ${

@@ -4,6 +4,11 @@ Eligibility fails closed, authorization is asserted at the service boundary so a
 future route cannot bypass it, and version allocation retries with the *same*
 already-built content so a caller never receives a report whose digest differs
 from the content it requested.
+
+``generation_origin`` is provenance of the *row*, not ``Operation.source``.
+It is not part of the M22 semantic content digest. Manual generation against a
+scheduled operation remains ``manual``. Automatic generation never fabricates a
+human admin actor.
 """
 
 from __future__ import annotations
@@ -21,7 +26,12 @@ from app.models.coverage import OperationCoverageSummary
 from app.models.diff import OperationDiffSummary
 from app.models.operation import Operation
 from app.models.organization import Organization, OrganizationMembership
-from app.models.report import REPORT_SCHEMA_VERSION, AssessmentReport
+from app.models.report import (
+    GENERATION_ORIGIN_MANUAL,
+    GENERATION_ORIGIN_SCHEDULED_AUTOMATIC,
+    REPORT_SCHEMA_VERSION,
+    AssessmentReport,
+)
 from app.services.audit import record_audit
 from app.services.authorization import AuthorizedOrgActor, assert_admin_actor, merge_auth_audit
 from app.services.coverage import TERMINAL_STATUSES
@@ -58,14 +68,38 @@ def _member_org_ids(db: Session, user_id: UUID) -> set[UUID]:
     )
 
 
+def _snapshot_envelope(
+    *,
+    report_id: UUID,
+    version: int,
+    digest: str,
+    generated_at: datetime,
+    origin: str,
+    created_by_user_id: UUID | None,
+) -> dict[str, Any]:
+    envelope: dict[str, Any] = {
+        "report_id": str(report_id),
+        "report_version": version,
+        "snapshot_digest": digest,
+        "generated_at": generated_at.isoformat(),
+        "origin": origin,
+    }
+    if origin == GENERATION_ORIGIN_MANUAL:
+        if created_by_user_id is None:
+            raise ValueError("manual reports require created_by_user_id")
+        envelope["generated_by"] = {"user_id": str(created_by_user_id)}
+    return envelope
+
+
 def _insert_report(
     db: Session,
     *,
     operation: Operation,
-    actor: AuthorizedOrgActor,
     version: int,
     digest: str,
     content: dict[str, Any],
+    origin: str,
+    created_by_user_id: UUID | None,
 ) -> AssessmentReport:
     summary = content["summary"]
     report_id = uuid4()
@@ -75,7 +109,8 @@ def _insert_report(
         organization_id=operation.organization_id,
         target_id=operation.target_id,
         operation_id=operation.id,
-        created_by_user_id=actor.user_id,
+        created_by_user_id=created_by_user_id,
+        generation_origin=origin,
         target_domain=str(content["identity"]["target_domain"]),
         report_version=version,
         schema_version=REPORT_SCHEMA_VERSION,
@@ -83,13 +118,14 @@ def _insert_report(
         snapshot_json={
             "report_schema_version": REPORT_SCHEMA_VERSION,
             # Envelope is deliberately excluded from the digest.
-            "envelope": {
-                "report_id": str(report_id),
-                "report_version": version,
-                "snapshot_digest": digest,
-                "generated_at": generated_at.isoformat(),
-                "generated_by": {"user_id": str(actor.user_id)},
-            },
+            "envelope": _snapshot_envelope(
+                report_id=report_id,
+                version=version,
+                digest=digest,
+                generated_at=generated_at,
+                origin=origin,
+                created_by_user_id=created_by_user_id,
+            ),
             "content": content,
         },
         operation_status_at_generation=operation.status,
@@ -108,19 +144,120 @@ def _insert_report(
     return report
 
 
-def generate_assessment_report(
+def _record_generated_audit(
     db: Session,
     *,
-    operation_id: UUID,
-    actor: AuthorizedOrgActor,
+    operation: Operation,
+    report: AssessmentReport,
+    origin: str,
+    actor: AuthorizedOrgActor | None,
+) -> None:
+    metadata: dict[str, Any] = {
+        "report_id": str(report.id),
+        "report_version": report.report_version,
+        "schema_version": report.schema_version,
+        "snapshot_digest": report.snapshot_digest,
+        "operation_id": str(operation.id),
+        "target_id": str(operation.target_id),
+        "operation_status": operation.status,
+        "headline_status": report.headline_status,
+        "assessment_completeness": report.assessment_completeness,
+        "findings_total": report.findings_total,
+        "findings_open": report.findings_open,
+        "generation_origin": origin,
+    }
+    if origin == GENERATION_ORIGIN_SCHEDULED_AUTOMATIC:
+        metadata["generation_reason"] = "scheduled_monitoring"
+        record_audit(
+            db,
+            organization_id=operation.organization_id,
+            actor_type="worker",
+            actor_user_id=None,
+            action="assessment_report.generated",
+            resource_type="assessment_report",
+            resource_id=report.id,
+            summary="Assessment report generated.",
+            metadata=metadata,
+        )
+        return
+    if actor is None:
+        raise ValueError("manual report audit requires an authorized actor")
+    record_audit(
+        db,
+        organization_id=operation.organization_id,
+        actor_type="user",
+        actor_user_id=actor.user_id,
+        action="assessment_report.generated",
+        resource_type="assessment_report",
+        resource_id=report.id,
+        summary="Assessment report generated.",
+        metadata=merge_auth_audit(actor, metadata),
+    )
+
+
+def persist_assessment_report(
+    db: Session,
+    *,
+    operation: Operation,
+    content: dict[str, Any],
+    digest: str,
+    origin: str,
+    created_by_user_id: UUID | None,
+    actor: AuthorizedOrgActor | None = None,
+    commit: bool = True,
 ) -> tuple[AssessmentReport, bool]:
-    """Return (report, created). Isolation 404 precedes the admin 403."""
-    operation = get_operation_or_404(db, operation_id=operation_id, user_id=actor.user_id)
-    assert_admin_actor(actor, operation.organization_id, not_found=NOT_FOUND_DETAIL)
+    """Insert or reuse by content digest. Does not rewrite an immutable existing row.
 
-    if operation.status not in TERMINAL_STATUSES:
-        raise _conflict("Operation has not reached a reportable state")
+    When ``commit`` is False the caller owns the outer transaction so automatic
+    job success can land in the same commit as a newly inserted report.
+    """
+    db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+        {"lock_key": f"assessment_report:{operation.id}"},
+    )
 
+    for _ in range(MAX_VERSION_ALLOCATION_ATTEMPTS):
+        latest = _latest_report(db, operation.id)
+        if latest is not None and latest.snapshot_digest == digest:
+            if commit:
+                db.commit()
+                db.refresh(latest)
+            return latest, False
+
+        next_version = (latest.report_version + 1) if latest is not None else 1
+        try:
+            with db.begin_nested():
+                report = _insert_report(
+                    db,
+                    operation=operation,
+                    version=next_version,
+                    digest=digest,
+                    content=content,
+                    origin=origin,
+                    created_by_user_id=created_by_user_id,
+                )
+        except IntegrityError:
+            # Another generation won this version number. Re-read and compare the
+            # same digest rather than trusting whatever landed.
+            db.expire_all()
+            continue
+
+        _record_generated_audit(
+            db, operation=operation, report=report, origin=origin, actor=actor
+        )
+        if commit:
+            db.commit()
+            db.refresh(report)
+        return report, True
+
+    raise _conflict(
+        "Assessment report generation could not allocate a version. Try again."
+    )
+
+
+def _require_report_inputs(
+    db: Session, operation: Operation
+) -> tuple[Organization, Any, OperationCoverageSummary, OperationDiffSummary | None]:
     control_snapshot = get_control_snapshot(db, operation_id=operation.id)
     if control_snapshot is None:
         raise _conflict("Operation control snapshot is not available")
@@ -143,7 +280,15 @@ def generate_assessment_report(
             OperationDiffSummary.operation_id == operation.id
         )
     )
+    return organization, control_snapshot, coverage_row, diff_row
 
+
+def build_report_digest_for_operation(
+    db: Session, operation: Operation
+) -> tuple[dict[str, Any], str]:
+    organization, control_snapshot, coverage_row, diff_row = _require_report_inputs(
+        db, operation
+    )
     content = build_report_content(
         db,
         operation,
@@ -152,71 +297,32 @@ def generate_assessment_report(
         coverage_row=coverage_row,
         diff_row=diff_row,
     )
-    digest = content_digest(content)
+    return content, content_digest(content)
 
-    # Serialize version allocation for this operation. Retry still compares digest
-    # so a concurrent insert of different content cannot be returned as ours.
-    db.execute(
-        text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
-        {"lock_key": f"assessment_report:{operation.id}"},
-    )
 
-    for _ in range(MAX_VERSION_ALLOCATION_ATTEMPTS):
-        latest = _latest_report(db, operation.id)
-        if latest is not None and latest.snapshot_digest == digest:
-            db.commit()
-            db.refresh(latest)
-            return latest, False
+def generate_assessment_report(
+    db: Session,
+    *,
+    operation_id: UUID,
+    actor: AuthorizedOrgActor,
+) -> tuple[AssessmentReport, bool]:
+    """Return (report, created). Isolation 404 precedes the admin 403."""
+    operation = get_operation_or_404(db, operation_id=operation_id, user_id=actor.user_id)
+    assert_admin_actor(actor, operation.organization_id, not_found=NOT_FOUND_DETAIL)
 
-        next_version = (latest.report_version + 1) if latest is not None else 1
-        try:
-            with db.begin_nested():
-                report = _insert_report(
-                    db,
-                    operation=operation,
-                    actor=actor,
-                    version=next_version,
-                    digest=digest,
-                    content=content,
-                )
-        except IntegrityError:
-            # Another generation won this version number. Re-read and compare the
-            # same digest rather than trusting whatever landed.
-            db.expire_all()
-            continue
+    if operation.status not in TERMINAL_STATUSES:
+        raise _conflict("Operation has not reached a reportable state")
 
-        record_audit(
-            db,
-            organization_id=operation.organization_id,
-            actor_type="user",
-            actor_user_id=actor.user_id,
-            action="assessment_report.generated",
-            resource_type="assessment_report",
-            resource_id=report.id,
-            summary="Assessment report generated.",
-            metadata=merge_auth_audit(
-                actor,
-                {
-                    "report_id": str(report.id),
-                    "report_version": report.report_version,
-                    "schema_version": report.schema_version,
-                    "snapshot_digest": report.snapshot_digest,
-                    "operation_id": str(operation.id),
-                    "target_id": str(operation.target_id),
-                    "operation_status": operation.status,
-                    "headline_status": report.headline_status,
-                    "assessment_completeness": report.assessment_completeness,
-                    "findings_total": report.findings_total,
-                    "findings_open": report.findings_open,
-                },
-            ),
-        )
-        db.commit()
-        db.refresh(report)
-        return report, True
-
-    raise _conflict(
-        "Assessment report generation could not allocate a version. Try again."
+    content, digest = build_report_digest_for_operation(db, operation)
+    return persist_assessment_report(
+        db,
+        operation=operation,
+        content=content,
+        digest=digest,
+        origin=GENERATION_ORIGIN_MANUAL,
+        created_by_user_id=actor.user_id,
+        actor=actor,
+        commit=True,
     )
 
 

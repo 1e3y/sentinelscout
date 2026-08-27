@@ -61,6 +61,7 @@ def _summary_response(report: AssessmentReport) -> AssessmentReportSummaryRespon
         target_id=report.target_id,
         operation_id=report.operation_id,
         created_by_user_id=report.created_by_user_id,
+        generation_origin=report.generation_origin,
         target_domain=report.target_domain,
         report_version=report.report_version,
         schema_version=report.schema_version,

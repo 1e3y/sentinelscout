@@ -223,6 +223,7 @@ def build_share_public_report(report: AssessmentReport, snapshot: dict[str, Any]
             "generated_at": envelope.get("generated_at") or report.generated_at.isoformat(),
             "snapshot_digest": str(report.snapshot_digest),
             "assessment_completeness": report.assessment_completeness,
+            "generation_origin": report.generation_origin,
         },
         "identity": _pick(
             identity,

@@ -24,6 +24,11 @@ if TYPE_CHECKING:
     from app.models.user import User
 
 REPORT_SCHEMA_VERSION = 1
+GENERATION_ORIGIN_MANUAL = "manual"
+GENERATION_ORIGIN_SCHEDULED_AUTOMATIC = "scheduled_automatic"
+GENERATION_ORIGINS = frozenset(
+    {GENERATION_ORIGIN_MANUAL, GENERATION_ORIGIN_SCHEDULED_AUTOMATIC}
+)
 
 ASSESSMENT_COMPLETENESS_VALUES = frozenset({"complete", "incomplete"})
 HEADLINE_STATUSES = frozenset(
@@ -58,6 +63,15 @@ class AssessmentReport(Base):
             name="ck_assessment_report_headline_status",
         ),
         CheckConstraint("report_version >= 1", name="ck_assessment_report_version_positive"),
+        CheckConstraint(
+            "generation_origin IN ('manual', 'scheduled_automatic')",
+            name="ck_assessment_report_generation_origin",
+        ),
+        CheckConstraint(
+            "(generation_origin = 'manual' AND created_by_user_id IS NOT NULL) OR "
+            "(generation_origin = 'scheduled_automatic' AND created_by_user_id IS NULL)",
+            name="ck_assessment_report_origin_actor",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -79,10 +93,13 @@ class AssessmentReport(Base):
         nullable=False,
         index=True,
     )
-    created_by_user_id: Mapped[uuid.UUID] = mapped_column(
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="RESTRICT"),
-        nullable=False,
+        nullable=True,
+    )
+    generation_origin: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="manual"
     )
     # Frozen copy of the control-snapshot domain so list views need no live join.
     target_domain: Mapped[str] = mapped_column(String(253), nullable=False)
@@ -107,4 +124,4 @@ class AssessmentReport(Base):
 
     operation: Mapped[Operation] = relationship("Operation")
     target: Mapped[AuthorizedTarget] = relationship("AuthorizedTarget")
-    created_by: Mapped[User] = relationship("User")
+    created_by: Mapped[User | None] = relationship("User")

@@ -416,6 +416,10 @@ def test_completed_operation_generates_report_with_frozen_sections(
 
     snapshot = body["snapshot"]
     assert set(snapshot) == {"report_schema_version", "envelope", "content"}
+    assert snapshot["envelope"]["origin"] == "manual"
+    assert snapshot["envelope"]["generated_by"]["user_id"]
+    assert body["generation_origin"] == "manual"
+    assert body["created_by_user_id"]
     content = snapshot["content"]
     assert set(content) == {
         "report_schema_version",
@@ -1053,6 +1057,8 @@ def test_digested_content_excludes_generation_time_volatility(
     content_blob = canonical_json(content)
     assert envelope["report_id"] not in content_blob
     assert envelope["generated_at"] not in content_blob
+    assert envelope["origin"] == "manual"
+    assert "origin" not in content
     assert '"generated_at"' not in content_blob
     assert "report_id" not in content
     assert "report_version" not in content

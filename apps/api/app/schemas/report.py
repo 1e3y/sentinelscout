@@ -17,7 +17,8 @@ class AssessmentReportSummaryResponse(BaseModel):
     organization_id: UUID
     target_id: UUID
     operation_id: UUID
-    created_by_user_id: UUID
+    created_by_user_id: UUID | None = None
+    generation_origin: str
     target_domain: str
     report_version: int
     schema_version: int
