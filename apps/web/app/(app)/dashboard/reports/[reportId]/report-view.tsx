@@ -284,6 +284,19 @@ export function AssessmentReportView({ report }: { report: AssessmentReportRespo
               envelope.origin ?? report.generation_origin,
             )}
           />
+          {report.automatic_delivery ? (
+            <Field
+              label="Automatic delivery"
+              value={
+                report.automatic_delivery.job_status === "pending" &&
+                !report.automatic_delivery.email_delivery_enabled
+                  ? "Queued — email delivery is disabled in this environment"
+                  : report.automatic_delivery.job_status === "succeeded"
+                    ? `Materialized (${report.automatic_delivery.delivered_count} delivered, ${report.automatic_delivery.pending_count} pending)`
+                    : report.automatic_delivery.job_status
+              }
+            />
+          ) : null}
           <Field label="Report version" value={`v${envelope.report_version}`} />
           <Field label="Operation status" value={identity.operation_status} />
           <Field

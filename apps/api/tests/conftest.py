@@ -27,6 +27,10 @@ os.environ["FRONTEND_URL"] = "http://localhost:3000"
 os.environ["CORS_ALLOWED_ORIGINS"] = "http://localhost:3000"
 os.environ["API_CORS_ORIGINS"] = "http://localhost:3000"
 os.environ["LOG_LEVEL"] = "WARNING"
+os.environ.setdefault(
+    "REPORT_DELIVERY_SECRET_KEY",
+    "aa" * 32,
+)
 
 from app.core.config import get_settings, reset_settings_cache
 from app.core.db import Base, get_db

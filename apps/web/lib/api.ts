@@ -179,6 +179,11 @@ export type MonitoringConfigurationResponse = {
   target_id: string;
   enabled: boolean;
   auto_generate_reports: boolean;
+  auto_deliver_reports: boolean;
+  auto_deliver_expires_in: "24h" | "7d" | "30d";
+  recipient_count: number;
+  recipients: string[] | null;
+  email_delivery_enabled: boolean;
   frequency: string;
   next_run_at: string | null;
   last_run_at: string | null;
@@ -528,6 +533,16 @@ export type AssessmentReportResponse = AssessmentReportSummaryResponse & {
     };
     content: AssessmentReportContent;
   };
+  automatic_delivery?: {
+    job_status: string;
+    last_error_code: string | null;
+    frozen_recipient_count: number;
+    outbox_count: number;
+    delivered_count: number;
+    skipped_count: number;
+    pending_count: number;
+    email_delivery_enabled: boolean;
+  } | null;
 };
 
 async function apiFetch<T>(
@@ -587,6 +602,9 @@ export function updateTargetMonitoring(
     enabled: boolean;
     frequency: "daily" | "weekly";
     auto_generate_reports?: boolean;
+    auto_deliver_reports?: boolean;
+    auto_deliver_expires_in?: "24h" | "7d" | "30d";
+    recipients?: string[];
   },
 ): Promise<MonitoringConfigurationResponse> {
   return apiFetch<MonitoringConfigurationResponse>(

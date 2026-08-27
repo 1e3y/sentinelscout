@@ -99,6 +99,10 @@ class Settings(BaseSettings):
     notification_provider_timeout_seconds: int = Field(
         default=15, alias="NOTIFICATION_PROVIDER_TIMEOUT_SECONDS"
     )
+    report_delivery_secret_key: str = Field(default="", alias="REPORT_DELIVERY_SECRET_KEY")
+    report_delivery_secret_key_version: str = Field(
+        default="v1", alias="REPORT_DELIVERY_SECRET_KEY_VERSION"
+    )
 
     @field_validator("environment", mode="before")
     @classmethod

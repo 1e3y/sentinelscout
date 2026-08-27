@@ -33,6 +33,8 @@ _AUDIT_METADATA_ALLOWLIST = frozenset(
         "frequency",
         "enabled",
         "auto_generate_reports",
+        "auto_deliver_reports",
+        "expires_in",
         "generation_origin",
         "generation_reason",
         "reused",
@@ -70,6 +72,8 @@ _AUDIT_METADATA_ALLOWLIST = frozenset(
         "findings_open",
         "share_id",
         "expires_at",
+        "creation_origin",
+        "delivery_job_id",
     }
 )
 
@@ -95,6 +99,10 @@ _BLOCKED_METADATA_KEYS = frozenset(
         "share_url",
         "secret_hash",
         "fragment",
+        "ciphertext",
+        "encrypted_secret",
+        "nonce",
+        "jwt",
     }
 )
 

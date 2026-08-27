@@ -136,7 +136,8 @@ export type SharedReportPublic = {
 export type ReportShareListItem = {
   id: string;
   report_id: string;
-  created_by_user_id: string;
+  created_by_user_id: string | null;
+  creation_origin?: "manual" | "scheduled_automatic";
   created_at: string;
   expires_at: string;
   revoked_at: string | null;

@@ -11,7 +11,10 @@ from app.models.candidate import SecurityCandidate
 from app.models.coverage import OperationCoverageSummary
 from app.models.diff import OperationDiffSummary
 from app.models.finding import Finding
-from app.models.monitoring import MonitoringConfiguration
+from app.models.monitoring import (
+    MonitoringConfiguration,
+    MonitoringReportDeliveryRecipient,
+)
 from app.models.notification import (
     OrganizationEmailRecipient,
     OrganizationNotificationSettings,
@@ -21,6 +24,10 @@ from app.models.operation_controls import OperationControlSnapshot
 from app.models.organization import Organization, OrganizationMembership
 from app.models.rate_limit import RateLimitCounter
 from app.models.report import AssessmentReport
+from app.models.report_delivery import (
+    AssessmentReportDeliveryJob,
+    AssessmentReportDeliveryOutbox,
+)
 from app.models.report_generation_job import AssessmentReportGenerationJob
 from app.models.report_share import AnonymousRateLimitCounter, AssessmentReportShare
 from app.models.retest import RetestAttempt
@@ -29,35 +36,38 @@ from app.models.user import User
 from app.models.validation import ValidationAttempt
 
 __all__ = [
-    "User",
-    "Organization",
-    "OrganizationMembership",
+    "Alert",
+    "AlertEpisode",
+    "AlertGenerationReceipt",
+    "AlertUserState",
+    "AnonymousRateLimitCounter",
+    "AssessmentReport",
+    "AssessmentReportDeliveryJob",
+    "AssessmentReportDeliveryOutbox",
+    "AssessmentReportGenerationJob",
+    "AssessmentReportShare",
+    "Asset",
+    "AuditEvent",
     "AuthorizedTarget",
-    "TargetAuthorization",
-    "TargetScope",
+    "DiscoveryObservation",
+    "Finding",
+    "MonitoringConfiguration",
+    "MonitoringReportDeliveryRecipient",
+    "NotificationOutbox",
     "Operation",
-    "OperationEvent",
     "OperationControlSnapshot",
     "OperationCoverageSummary",
     "OperationDiffSummary",
-    "Asset",
-    "DiscoveryObservation",
-    "SecurityCandidate",
-    "ValidationAttempt",
-    "Finding",
-    "RetestAttempt",
-    "MonitoringConfiguration",
-    "AuditEvent",
-    "RateLimitCounter",
-    "AlertEpisode",
-    "Alert",
-    "AlertUserState",
-    "NotificationOutbox",
-    "AlertGenerationReceipt",
-    "OrganizationNotificationSettings",
+    "OperationEvent",
+    "Organization",
     "OrganizationEmailRecipient",
-    "AssessmentReport",
-    "AssessmentReportGenerationJob",
-    "AssessmentReportShare",
-    "AnonymousRateLimitCounter",
+    "OrganizationMembership",
+    "OrganizationNotificationSettings",
+    "RateLimitCounter",
+    "RetestAttempt",
+    "SecurityCandidate",
+    "TargetAuthorization",
+    "TargetScope",
+    "User",
+    "ValidationAttempt",
 ]

@@ -18,6 +18,11 @@ from app.services.notification_runtime import (
     email_delivery_readiness,
     process_one_email_delivery,
 )
+from app.services.reports.delivery import (
+    process_one_delivery_intent,
+    process_one_report_delivery_email,
+)
+from app.services.reports.delivery_crypto import report_delivery_crypto_ready
 
 logger = logging.getLogger("scout.notification_worker")
 
@@ -80,11 +85,36 @@ def main() -> None:
                 time.sleep(poll_interval)
                 continue
 
+            crypto_ok, crypto_reason = report_delivery_crypto_ready(settings)
+            if not crypto_ok:
+                logger.error(
+                    "report delivery not ready; leaving automatic report delivery pending",
+                    extra={
+                        "event": "notification_worker.report_delivery_not_ready",
+                        "reason": crypto_reason,
+                    },
+                )
+
+            did_work = False
+            if crypto_ok:
+                intent = process_one_delivery_intent(
+                    session_factory, settings=settings
+                )
+                if intent is not None:
+                    did_work = True
             row = process_one_email_delivery(
                 session_factory, provider=provider, settings=settings
             )
+            if row is not None:
+                did_work = True
+            if crypto_ok:
+                report_row = process_one_report_delivery_email(
+                    session_factory, provider=provider, settings=settings
+                )
+                if report_row is not None:
+                    did_work = True
             consecutive_errors = 0
-            if row is None:
+            if not did_work:
                 slept = 0.0
                 while slept < poll_interval and not _Shutdown.stop:
                     time.sleep(min(0.25, poll_interval - slept))

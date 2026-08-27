@@ -2,26 +2,31 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import delete, select
+from sqlalchemy.orm import Session, joinedload, selectinload
 
-from app.models.monitoring import MONITORING_FREQUENCIES, MonitoringConfiguration
-from app.services.diff import latest_diff_counts
+from app.models.monitoring import (
+    AUTO_DELIVER_EXPIRES_IN,
+    MONITORING_FREQUENCIES,
+    MonitoringConfiguration,
+    MonitoringReportDeliveryRecipient,
+)
 from app.models.organization import OrganizationMembership
 from app.models.target import AuthorizedTarget
 from app.services.audit import record_audit
 from app.services.authorization import AuthorizedOrgActor, assert_admin_actor, merge_auth_audit
+from app.services.diff import latest_diff_counts
 
 
 def compute_next_run_at(frequency: str, *, from_time: datetime | None = None) -> datetime:
-    base = from_time or datetime.now(timezone.utc)
+    base = from_time or datetime.now(UTC)
     if base.tzinfo is None:
-        base = base.replace(tzinfo=timezone.utc)
+        base = base.replace(tzinfo=UTC)
     if frequency == "daily":
         return base + timedelta(days=1)
     if frequency == "weekly":
@@ -58,9 +63,9 @@ def get_monitoring_for_target(
 ) -> MonitoringConfiguration | None:
     target = _require_target_for_user(db, target_id=target_id, user_id=user_id)
     return db.scalar(
-        select(MonitoringConfiguration).where(
-            MonitoringConfiguration.target_id == target.id
-        )
+        select(MonitoringConfiguration)
+        .options(selectinload(MonitoringConfiguration.delivery_recipients))
+        .where(MonitoringConfiguration.target_id == target.id)
     )
 
 
@@ -72,11 +77,19 @@ def upsert_monitoring(
     enabled: bool,
     frequency: str,
     auto_generate_reports: bool | None = None,
+    auto_deliver_reports: bool | None = None,
+    auto_deliver_expires_in: str | None = None,
+    recipients: list[str] | None = None,
 ) -> MonitoringConfiguration:
     if frequency not in MONITORING_FREQUENCIES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="frequency must be 'daily' or 'weekly'",
+        )
+    if auto_deliver_expires_in is not None and auto_deliver_expires_in not in AUTO_DELIVER_EXPIRES_IN:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="auto_deliver_expires_in must be '24h', '7d', or '30d'",
         )
 
     target = _require_target_for_user(db, target_id=target_id, user_id=actor.user_id)
@@ -100,16 +113,41 @@ def upsert_monitoring(
             )
 
     config = db.scalar(
-        select(MonitoringConfiguration).where(
-            MonitoringConfiguration.target_id == target.id
-        )
+        select(MonitoringConfiguration)
+        .options(selectinload(MonitoringConfiguration.delivery_recipients))
+        .where(MonitoringConfiguration.target_id == target.id)
     )
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     previous_auto = False if config is None else bool(config.auto_generate_reports)
     if auto_generate_reports is None:
         resolved_auto = previous_auto
     else:
         resolved_auto = bool(auto_generate_reports)
+
+    previous_deliver = False if config is None else bool(config.auto_deliver_reports)
+    if auto_deliver_reports is None:
+        resolved_deliver = previous_deliver
+    else:
+        resolved_deliver = bool(auto_deliver_reports)
+
+    previous_expires = "7d" if config is None else str(config.auto_deliver_expires_in or "7d")
+    if auto_deliver_expires_in is None:
+        resolved_expires = previous_expires if previous_expires in AUTO_DELIVER_EXPIRES_IN else "7d"
+    else:
+        resolved_expires = auto_deliver_expires_in
+
+    previous_recipients = (
+        []
+        if config is None
+        else sorted(row.email_normalized for row in config.delivery_recipients)
+    )
+    replacing_recipients = recipients is not None
+    if replacing_recipients:
+        from app.services.reports.delivery import normalize_recipient_list
+
+        resolved_recipients = normalize_recipient_list(recipients)
+    else:
+        resolved_recipients = previous_recipients
 
     if config is None:
         config = MonitoringConfiguration(
@@ -117,15 +155,20 @@ def upsert_monitoring(
             target_id=target.id,
             enabled=enabled,
             auto_generate_reports=resolved_auto,
+            auto_deliver_reports=resolved_deliver,
+            auto_deliver_expires_in=resolved_expires,
             frequency=frequency,
             updated_by_user_id=actor.user_id,
             next_run_at=compute_next_run_at(frequency, from_time=now) if enabled else None,
             disabled_reason=None if enabled else "Monitoring disabled by user.",
         )
         db.add(config)
+        db.flush()
     else:
         config.enabled = enabled
         config.auto_generate_reports = resolved_auto
+        config.auto_deliver_reports = resolved_deliver
+        config.auto_deliver_expires_in = resolved_expires
         config.frequency = frequency
         config.updated_by_user_id = actor.user_id
         config.updated_at = now
@@ -137,6 +180,23 @@ def upsert_monitoring(
         else:
             config.disabled_reason = "Monitoring disabled by user."
             # Keep next_run_at for audit; scheduler ignores disabled.
+
+    if replacing_recipients:
+        db.execute(
+            delete(MonitoringReportDeliveryRecipient).where(
+                MonitoringReportDeliveryRecipient.monitoring_configuration_id == config.id
+            )
+        )
+        for email in resolved_recipients:
+            db.add(
+                MonitoringReportDeliveryRecipient(
+                    organization_id=target.organization_id,
+                    monitoring_configuration_id=config.id,
+                    target_id=target.id,
+                    email_normalized=email,
+                    created_by_user_id=actor.user_id,
+                )
+            )
 
     action = "monitoring.enabled" if enabled else "monitoring.disabled"
     record_audit(
@@ -157,6 +217,7 @@ def upsert_monitoring(
                 "domain": target.domain,
                 "enabled": enabled,
                 "auto_generate_reports": resolved_auto,
+                "auto_deliver_reports": resolved_deliver,
                 "frequency": frequency,
                 "status": "enabled" if enabled else "disabled",
             },
@@ -186,6 +247,55 @@ def upsert_monitoring(
                     "target_id": str(target.id),
                     "domain": target.domain,
                     "auto_generate_reports": resolved_auto,
+                },
+            ),
+        )
+    if previous_deliver != resolved_deliver:
+        deliver_action = (
+            "monitoring.auto_delivery_enabled"
+            if resolved_deliver
+            else "monitoring.auto_delivery_disabled"
+        )
+        record_audit(
+            db,
+            organization_id=target.organization_id,
+            actor_type="user",
+            actor_user_id=actor.user_id,
+            action=deliver_action,
+            resource_type="monitoring",
+            resource_id=config.id,
+            summary=(
+                f"Automatic report delivery "
+                f"{'enabled' if resolved_deliver else 'disabled'} for {target.domain}."
+            ),
+            metadata=merge_auth_audit(
+                actor,
+                {
+                    "target_id": str(target.id),
+                    "domain": target.domain,
+                    "auto_deliver_reports": resolved_deliver,
+                    "recipient_count": len(resolved_recipients),
+                    "expires_in": resolved_expires,
+                },
+            ),
+        )
+    if replacing_recipients and previous_recipients != resolved_recipients:
+        record_audit(
+            db,
+            organization_id=target.organization_id,
+            actor_type="user",
+            actor_user_id=actor.user_id,
+            action="monitoring.auto_delivery_recipients_updated",
+            resource_type="monitoring",
+            resource_id=config.id,
+            summary=f"Automatic report delivery recipients updated for {target.domain}.",
+            metadata=merge_auth_audit(
+                actor,
+                {
+                    "target_id": str(target.id),
+                    "domain": target.domain,
+                    "recipient_count": len(resolved_recipients),
+                    "expires_in": resolved_expires,
                 },
             ),
         )

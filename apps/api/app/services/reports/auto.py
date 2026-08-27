@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
@@ -55,7 +55,7 @@ class AutomaticJobAuthz:
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def retry_delay_seconds(attempt_count: int) -> int:
@@ -320,6 +320,14 @@ def _process_claimed_job(
         if not owned:
             db.rollback()
             return None
+        from app.services.reports.delivery import enqueue_automatic_report_delivery
+
+        enqueue_automatic_report_delivery(
+            db,
+            operation=operation,
+            report=report,
+            generation_job_id=job_id,
+        )
         if before_success_commit is not None:
             before_success_commit()
         db.commit()
@@ -331,7 +339,7 @@ def _process_claimed_job(
                 "job_id": str(job_id),
                 "operation_id": str(operation.id),
                 "report_id": str(report.id),
-                "created": created,
+                "report_created": created,
                 "reused": not created,
             },
         )

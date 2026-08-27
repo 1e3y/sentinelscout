@@ -1,8 +1,8 @@
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from alembic import context
 from app.core.config import get_settings
 from app.core.db import Base
 from app.models import (  # noqa: F401
@@ -12,24 +12,27 @@ from app.models import (  # noqa: F401
     AlertUserState,
     AnonymousRateLimitCounter,
     AssessmentReport,
+    AssessmentReportDeliveryJob,
+    AssessmentReportDeliveryOutbox,
     AssessmentReportGenerationJob,
     AssessmentReportShare,
-    NotificationOutbox,
     Asset,
+    AuditEvent,
     AuthorizedTarget,
     DiscoveryObservation,
+    Finding,
+    MonitoringConfiguration,
+    MonitoringReportDeliveryRecipient,
+    NotificationOutbox,
     Operation,
+    OperationControlSnapshot,
+    OperationCoverageSummary,
+    OperationDiffSummary,
     OperationEvent,
     Organization,
     OrganizationEmailRecipient,
     OrganizationMembership,
     OrganizationNotificationSettings,
-    AuditEvent,
-    Finding,
-    MonitoringConfiguration,
-    OperationControlSnapshot,
-    OperationCoverageSummary,
-    OperationDiffSummary,
     RateLimitCounter,
     RetestAttempt,
     SecurityCandidate,

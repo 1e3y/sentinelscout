@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from app.api.deps import AuthContext, get_auth_context, get_db, require_org_admin
+from app.core.config import get_settings
 from app.schemas.monitoring import MonitoringConfigurationResponse, UpsertMonitoringRequest
 from app.schemas.target import (
     CreateTargetRequest,
@@ -238,7 +239,15 @@ def revoke_target_endpoint(
     return _to_target_response(target)
 
 
-def _to_monitoring_response(config, *, target_id: UUID, organization_id: UUID, changes: dict):
+def _to_monitoring_response(
+    config,
+    *,
+    target_id: UUID,
+    organization_id: UUID,
+    changes: dict,
+    include_recipients: bool,
+):
+    email_delivery_enabled = bool(get_settings().email_delivery_enabled)
     if config is None:
         return MonitoringConfigurationResponse(
             id=None,
@@ -246,6 +255,11 @@ def _to_monitoring_response(config, *, target_id: UUID, organization_id: UUID, c
             target_id=target_id,
             enabled=False,
             auto_generate_reports=False,
+            auto_deliver_reports=False,
+            auto_deliver_expires_in="7d",
+            recipient_count=0,
+            recipients=[] if include_recipients else None,
+            email_delivery_enabled=email_delivery_enabled,
             frequency="weekly",
             next_run_at=None,
             last_run_at=None,
@@ -254,12 +268,18 @@ def _to_monitoring_response(config, *, target_id: UUID, organization_id: UUID, c
             updated_at=None,
             latest_changes=changes,
         )
+    emails = sorted(row.email_normalized for row in (config.delivery_recipients or []))
     return MonitoringConfigurationResponse(
         id=config.id,
         organization_id=config.organization_id,
         target_id=config.target_id,
         enabled=bool(config.enabled),
         auto_generate_reports=bool(config.auto_generate_reports),
+        auto_deliver_reports=bool(config.auto_deliver_reports),
+        auto_deliver_expires_in=config.auto_deliver_expires_in or "7d",
+        recipient_count=len(emails),
+        recipients=emails if include_recipients else None,
+        email_delivery_enabled=email_delivery_enabled,
         frequency=config.frequency,
         next_run_at=config.next_run_at,
         last_run_at=config.last_run_at,
@@ -283,11 +303,14 @@ def get_monitoring_endpoint(
     )
     config = get_monitoring_for_target(db, target_id=target.id, user_id=auth.user.id)
     changes = latest_change_counts(db, target_id=target.id)
+    actor = auth.org_actor()
+    include_recipients = actor is not None and actor.is_admin
     return _to_monitoring_response(
         config,
         target_id=target.id,
         organization_id=target.organization_id,
         changes=changes,
+        include_recipients=include_recipients,
     )
 
 
@@ -311,11 +334,16 @@ def upsert_monitoring_endpoint(
         enabled=body.enabled,
         frequency=body.frequency,
         auto_generate_reports=body.auto_generate_reports,
+        auto_deliver_reports=body.auto_deliver_reports,
+        auto_deliver_expires_in=body.auto_deliver_expires_in,
+        recipients=body.recipients,
     )
+    config = get_monitoring_for_target(db, target_id=config.target_id, user_id=auth.user.id)
     changes = latest_change_counts(db, target_id=config.target_id)
     return _to_monitoring_response(
         config,
         target_id=config.target_id,
         organization_id=config.organization_id,
         changes=changes,
+        include_recipients=True,
     )

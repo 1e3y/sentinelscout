@@ -36,8 +36,20 @@ class AssessmentReportSummaryResponse(BaseModel):
     headline_label: str
 
 
+class AutomaticDeliveryStatusResponse(BaseModel):
+    job_status: str
+    last_error_code: str | None = None
+    frozen_recipient_count: int = 0
+    outbox_count: int = 0
+    delivered_count: int = 0
+    skipped_count: int = 0
+    pending_count: int = 0
+    email_delivery_enabled: bool = False
+
+
 class AssessmentReportResponse(AssessmentReportSummaryResponse):
     snapshot: dict[str, Any] = Field(default_factory=dict)
+    automatic_delivery: AutomaticDeliveryStatusResponse | None = None
 
 
 class CreateReportShareRequest(BaseModel):
@@ -54,7 +66,8 @@ class CreateReportShareResponse(BaseModel):
 class ReportShareListItem(BaseModel):
     id: UUID
     report_id: UUID
-    created_by_user_id: UUID
+    created_by_user_id: UUID | None = None
+    creation_origin: str = "manual"
     created_at: datetime
     expires_at: datetime
     revoked_at: datetime | None

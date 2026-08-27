@@ -4,7 +4,15 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -13,6 +21,12 @@ from app.core.db import Base
 if TYPE_CHECKING:
     from app.models.report import AssessmentReport
     from app.models.user import User
+
+SHARE_CREATION_ORIGIN_MANUAL = "manual"
+SHARE_CREATION_ORIGIN_SCHEDULED_AUTOMATIC = "scheduled_automatic"
+SHARE_CREATION_ORIGINS = frozenset(
+    {SHARE_CREATION_ORIGIN_MANUAL, SHARE_CREATION_ORIGIN_SCHEDULED_AUTOMATIC}
+)
 
 
 class AssessmentReportShare(Base):
@@ -25,6 +39,18 @@ class AssessmentReportShare(Base):
     __table_args__ = (
         CheckConstraint("length(secret_hash) = 64", name="ck_report_share_secret_hash_len"),
         CheckConstraint("expires_at > created_at", name="ck_report_share_expires_after_create"),
+        CheckConstraint(
+            "creation_origin IN ('manual', 'scheduled_automatic')",
+            name="ck_assessment_report_share_creation_origin",
+        ),
+        CheckConstraint(
+            "(creation_origin = 'manual' AND created_by_user_id IS NOT NULL) OR "
+            "(creation_origin = 'scheduled_automatic' AND created_by_user_id IS NULL)",
+            name="ck_assessment_report_share_origin_actor",
+        ),
+        UniqueConstraint(
+            "delivery_outbox_id", name="uq_assessment_report_share_delivery_outbox"
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -40,10 +66,17 @@ class AssessmentReportShare(Base):
         nullable=False,
         index=True,
     )
-    created_by_user_id: Mapped[uuid.UUID] = mapped_column(
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="RESTRICT"),
-        nullable=False,
+        nullable=True,
+    )
+    creation_origin: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=SHARE_CREATION_ORIGIN_MANUAL
+    )
+    delivery_outbox_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
     )
     secret_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -53,7 +86,7 @@ class AssessmentReportShare(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     report: Mapped[AssessmentReport] = relationship("AssessmentReport")
-    created_by: Mapped[User] = relationship("User")
+    created_by: Mapped[User | None] = relationship("User")
 
 
 class AnonymousRateLimitCounter(Base):

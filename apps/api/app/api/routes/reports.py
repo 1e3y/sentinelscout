@@ -10,23 +10,26 @@ from app.api.deps import (
     get_db,
     require_active_org_actor,
 )
+from app.core.config import get_settings
 from app.models.report import AssessmentReport
 from app.models.report_share import AssessmentReportShare
 from app.schemas.report import (
     AssessmentReportResponse,
     AssessmentReportSummaryResponse,
+    AutomaticDeliveryStatusResponse,
     CreateReportShareRequest,
     CreateReportShareResponse,
     ReportShareListItem,
     RevokeReportShareResponse,
 )
+from app.services.authorization import assert_admin_actor
 from app.services.rate_limit import (
     ACTION_REPORT_GENERATE,
     ACTION_REPORT_PDF_EXPORT,
     ACTION_REPORT_SHARE_CREATE,
     enforce_rate_limit,
 )
-from app.services.authorization import assert_admin_actor
+from app.services.reports.delivery import automatic_delivery_status
 from app.services.reports.generate import (
     REPORT_NOT_FOUND_DETAIL,
     generate_assessment_report,
@@ -80,11 +83,20 @@ def _summary_response(report: AssessmentReport) -> AssessmentReportSummaryRespon
     )
 
 
-def _full_response(report: AssessmentReport) -> AssessmentReportResponse:
+def _full_response(report: AssessmentReport, db=None) -> AssessmentReportResponse:
     base = _summary_response(report)
+    delivery = None
+    if db is not None:
+        status_payload = automatic_delivery_status(db, report_id=report.id)
+        if status_payload is not None:
+            delivery = AutomaticDeliveryStatusResponse(
+                **status_payload,
+                email_delivery_enabled=bool(get_settings().email_delivery_enabled),
+            )
     return AssessmentReportResponse(
         **base.model_dump(),
         snapshot=dict(report.snapshot_json or {}),
+        automatic_delivery=delivery,
     )
 
 
@@ -106,7 +118,7 @@ def generate_report_endpoint(
         db, operation_id=operation_id, actor=actor
     )
     response.status_code = 201 if created else 200
-    return _full_response(report)
+    return _full_response(report, db)
 
 
 @operation_router.get(
@@ -148,7 +160,7 @@ def get_report_endpoint(
     db: Annotated[Session, Depends(get_db)],
 ) -> AssessmentReportResponse:
     report = get_assessment_report_or_404(db, report_id=report_id, user_id=auth.user.id)
-    return _full_response(report)
+    return _full_response(report, db)
 
 
 @router.get("/{report_id}/pdf")

@@ -17,7 +17,10 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.models.report import AssessmentReport
-from app.models.report_share import AssessmentReportShare
+from app.models.report_share import (
+    SHARE_CREATION_ORIGIN_MANUAL,
+    AssessmentReportShare,
+)
 from app.services.audit import record_audit
 from app.services.authorization import AuthorizedOrgActor, assert_admin_actor, merge_auth_audit
 from app.services.reports.generate import (
@@ -383,6 +386,8 @@ def create_report_share(
         organization_id=report.organization_id,
         report_id=report.id,
         created_by_user_id=actor.user_id,
+        creation_origin=SHARE_CREATION_ORIGIN_MANUAL,
+        delivery_outbox_id=None,
         secret_hash=hash_share_secret(secret),
         created_at=created_at,
         expires_at=created_at + _EXPIRY_DELTAS[expires_in],
@@ -587,6 +592,7 @@ def share_list_item(share: AssessmentReportShare) -> dict[str, Any]:
         "id": share.id,
         "report_id": share.report_id,
         "created_by_user_id": share.created_by_user_id,
+        "creation_origin": share.creation_origin,
         "created_at": share.created_at,
         "expires_at": share.expires_at,
         "revoked_at": share.revoked_at,

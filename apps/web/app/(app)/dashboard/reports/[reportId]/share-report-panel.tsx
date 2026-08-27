@@ -147,6 +147,9 @@ export function ShareReportPanel({ reportId }: Props) {
             className="flex flex-wrap items-center justify-between gap-2 border-t border-zinc-100 pt-2"
           >
             <span>
+              {share.creation_origin === "scheduled_automatic"
+                ? "Automatic delivery · "
+                : ""}
               {share.status} · expires {new Date(share.expires_at).toLocaleString()}
             </span>
             {share.status === "active" ? (
