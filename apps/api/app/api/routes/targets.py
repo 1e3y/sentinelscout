@@ -1,11 +1,12 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from app.api.deps import AuthContext, get_auth_context, get_db, require_org_admin
 from app.core.config import get_settings
+from app.schemas.assessment_history import AssessmentHistoryResponse
 from app.schemas.monitoring import MonitoringConfigurationResponse, UpsertMonitoringRequest
 from app.schemas.target import (
     CreateTargetRequest,
@@ -13,6 +14,11 @@ from app.schemas.target import (
     TargetScopeResponse,
     UpdateTargetScopeRequest,
     VerifyTargetResponse,
+)
+from app.services.assessment_history import (
+    DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+    list_assessment_history,
 )
 from app.services.dns import DnsTxtResolver
 from app.services.monitoring import (
@@ -287,6 +293,29 @@ def _to_monitoring_response(
         created_at=config.created_at,
         updated_at=config.updated_at,
         latest_changes=changes,
+    )
+
+
+@router.get(
+    "/{target_id}/assessment-history",
+    response_model=AssessmentHistoryResponse,
+)
+def get_assessment_history_endpoint(
+    target_id: UUID,
+    auth: Annotated[AuthContext, Depends(get_auth_context)],
+    db: Annotated[Session, Depends(get_db)],
+    page_size: Annotated[
+        int, Query(ge=1, le=MAX_PAGE_SIZE)
+    ] = DEFAULT_PAGE_SIZE,
+    cursor: str | None = None,
+) -> AssessmentHistoryResponse:
+    require_active_organization(auth)
+    assert auth.active_organization is not None
+    target = get_org_target_or_404(
+        db, target_id=target_id, organization_id=auth.active_organization.id
+    )
+    return list_assessment_history(
+        db, target=target, page_size=page_size, cursor=cursor
     )
 
 

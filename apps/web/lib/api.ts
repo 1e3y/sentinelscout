@@ -201,6 +201,101 @@ export type MonitoringConfigurationResponse = {
   };
 };
 
+export type AssessmentHistoryCoverage = {
+  frozen_at: string;
+  source: string;
+  operation_status_at_freeze: string;
+  capability_manifest_version: number;
+  headline: string;
+  in_scope_discovered: number;
+  submitted_for_http_observation: number;
+  http_observation_obtained: number;
+  http_observation_not_obtained: number;
+  incomplete_hostnames: number;
+  surface_coverage_ratio: {
+    numerator: number;
+    denominator: number;
+    value: number | null;
+  } | null;
+  headers_captured: number;
+  http_observations: number;
+  header_evidence_unavailable: number;
+  discovery_truncated: boolean;
+  discovered_results_discarded: number;
+};
+
+export type AssessmentHistoryComparison = {
+  comparability: string;
+  baseline_operation_id: string | null;
+  baseline_completed_at: string | null;
+  headline: string;
+  security_signal_baseline_unavailable: boolean;
+  security_signal_comparison_suppressed: boolean;
+  security_signal_suppression_reason: string | null;
+};
+
+export type AssessmentHistorySurfaceChanges = {
+  hostnames_newly_discovered: number;
+  hostnames_no_longer_discovered: number;
+  http_observation_gained: number;
+  http_observation_lost: number;
+};
+
+export type AssessmentHistorySignals = {
+  candidates_newly_emitted: number;
+  candidates_no_longer_emitted: number;
+  conservative_regressions: number;
+  regression_hsts_lost: number;
+  regression_resolved_condition_reappeared: number;
+  regression_header_evidence_lost: number;
+};
+
+export type AssessmentHistoryLatestReport = {
+  id: string;
+  report_version: number;
+  version_count: number;
+  generation_origin: "manual" | "scheduled_automatic";
+  generated_at: string;
+  headline_status: string;
+  headline_label: string;
+  assessment_completeness: string;
+  findings_total: number;
+  findings_open: number;
+  findings_resolved: number;
+  regression_count: number;
+  coverage_limitation_count: number;
+  severity_counts: Record<string, number>;
+};
+
+export type AssessmentHistoryRow = {
+  operation_id: string;
+  status: string;
+  source: string;
+  testing_profile: string;
+  created_at: string;
+  started_at: string | null;
+  ended_at: string;
+  completed_at: string | null;
+  failed_at: string | null;
+  stopped_at: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  completeness: "complete" | "incomplete";
+  coverage: AssessmentHistoryCoverage | null;
+  comparison: AssessmentHistoryComparison | null;
+  surface_changes: AssessmentHistorySurfaceChanges | null;
+  signals: AssessmentHistorySignals | null;
+  latest_report: AssessmentHistoryLatestReport | null;
+};
+
+export type AssessmentHistoryResponse = {
+  target_id: string;
+  target_domain: string;
+  page_size: number;
+  next_cursor: string | null;
+  items: AssessmentHistoryRow[];
+};
+
 export type OperationEventResponse = {
   id: string;
   operation_id: string;
@@ -591,6 +686,21 @@ export function fetchTargetMonitoring(
 ): Promise<MonitoringConfigurationResponse> {
   return apiFetch<MonitoringConfigurationResponse>(
     `/v1/targets/${targetId}/monitoring`,
+    token,
+  );
+}
+
+export function fetchAssessmentHistory(
+  token: string,
+  targetId: string,
+  options: { page_size?: number; cursor?: string | null } = {},
+): Promise<AssessmentHistoryResponse> {
+  const params = new URLSearchParams();
+  if (options.page_size != null) params.set("page_size", String(options.page_size));
+  if (options.cursor) params.set("cursor", options.cursor);
+  const query = params.toString();
+  return apiFetch<AssessmentHistoryResponse>(
+    `/v1/targets/${targetId}/assessment-history${query ? `?${query}` : ""}`,
     token,
   );
 }

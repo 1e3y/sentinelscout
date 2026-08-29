@@ -3,6 +3,7 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { fetchMe, fetchOrganizations } from "@/lib/api";
 import { AlertsPanel } from "./alerts-panel";
+import { AssessmentHistoryPanel } from "./assessment-history-panel";
 import { AuditPanel } from "./audit-panel";
 import { FindingsPanel } from "./findings-panel";
 import { MonitoringPanel } from "./monitoring-panel";
@@ -107,6 +108,7 @@ export default async function DashboardPage() {
             enabled={Boolean(activeOrg)}
             isAdmin={me?.active_organization_role === "admin"}
           />
+          <AssessmentHistoryPanel enabled={Boolean(activeOrg)} />
           <AlertsPanel enabled={Boolean(activeOrg)} />
           <NotificationSettingsPanel enabled={Boolean(activeOrg)} />
           <OperationsPanel
