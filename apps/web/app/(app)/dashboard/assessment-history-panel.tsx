@@ -268,7 +268,7 @@ export function AssessmentHistoryPanel({ enabled }: Props) {
   }, [enabled]);
 
   return (
-    <section className="space-y-4">
+    <section className="space-y-4" id="assessment-history">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-medium">Assessment History</h2>

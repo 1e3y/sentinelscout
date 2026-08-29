@@ -296,6 +296,100 @@ export type AssessmentHistoryResponse = {
   items: AssessmentHistoryRow[];
 };
 
+export type AttentionProvenance =
+  | "operation_history"
+  | "frozen_assessment"
+  | "current_state";
+
+export type SecurityOverviewAttentionReason = {
+  code: string;
+  label: string;
+  provenance: AttentionProvenance;
+};
+
+export type SecurityOverviewLatestTerminal = {
+  operation_id: string;
+  status: string;
+  source: string;
+  ended_at: string;
+};
+
+export type SecurityOverviewLatestCompleted = {
+  operation_id: string;
+  completed_at: string;
+  source: string;
+};
+
+export type SecurityOverviewReport = {
+  id: string;
+  report_version: number;
+  version_count: number;
+  generation_origin: "manual" | "scheduled_automatic";
+  generated_at: string;
+  headline_status: string;
+  headline_label: string;
+  assessment_completeness: string;
+};
+
+export type SecurityOverviewAlerts = {
+  active_episode_count: number;
+  unacknowledged_active_episode_count: number;
+};
+
+export type SecurityOverviewAutomation = {
+  monitoring_enabled: boolean;
+  frequency: string | null;
+  next_run_at: string | null;
+  last_run_at: string | null;
+  disabled_reason: string | null;
+  auto_generate_reports: boolean;
+  auto_deliver_reports: boolean;
+  auto_deliver_expires_in: string | null;
+  delivery_recipient_count: number;
+  email_delivery_enabled: boolean;
+};
+
+export type SecurityOverviewStaleness = {
+  is_stale: boolean | null;
+  threshold_days: number | null;
+  threshold_basis: "monitoring_cadence" | "not_applicable";
+  days_since_last_completed: number | null;
+};
+
+export type SecurityOverviewRow = {
+  target_id: string;
+  domain: string;
+  authorization_status: string;
+  verified_at: string | null;
+  revoked_at: string | null;
+  latest_terminal: SecurityOverviewLatestTerminal | null;
+  latest_completed: SecurityOverviewLatestCompleted | null;
+  coverage: AssessmentHistoryCoverage | null;
+  comparison: AssessmentHistoryComparison | null;
+  signals: AssessmentHistorySignals | null;
+  latest_report: SecurityOverviewReport | null;
+  alerts: SecurityOverviewAlerts;
+  automation: SecurityOverviewAutomation;
+  staleness: SecurityOverviewStaleness;
+  attention_reasons: SecurityOverviewAttentionReason[];
+};
+
+export type SecurityOverviewSummary = {
+  scope: "organization";
+  target_count: number;
+  verified_targets_without_completed_assessment: number;
+  targets_with_active_alert_episode: number;
+};
+
+export type SecurityOverviewResponse = {
+  organization_id: string;
+  page_size: number;
+  sort: "domain_asc";
+  next_cursor: string | null;
+  summary: SecurityOverviewSummary;
+  items: SecurityOverviewRow[];
+};
+
 export type OperationEventResponse = {
   id: string;
   operation_id: string;
@@ -701,6 +795,20 @@ export function fetchAssessmentHistory(
   const query = params.toString();
   return apiFetch<AssessmentHistoryResponse>(
     `/v1/targets/${targetId}/assessment-history${query ? `?${query}` : ""}`,
+    token,
+  );
+}
+
+export function fetchSecurityOverview(
+  token: string,
+  options: { page_size?: number; cursor?: string | null } = {},
+): Promise<SecurityOverviewResponse> {
+  const params = new URLSearchParams();
+  if (options.page_size != null) params.set("page_size", String(options.page_size));
+  if (options.cursor) params.set("cursor", options.cursor);
+  const query = params.toString();
+  return apiFetch<SecurityOverviewResponse>(
+    `/v1/security-overview${query ? `?${query}` : ""}`,
     token,
   );
 }

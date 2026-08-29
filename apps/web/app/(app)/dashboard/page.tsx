@@ -10,6 +10,7 @@ import { MonitoringPanel } from "./monitoring-panel";
 import { NotificationSettingsPanel } from "./notification-settings-panel";
 import { OperationsPanel } from "./operations-panel";
 import { ReportsPanel } from "./reports-panel";
+import { SecurityOverviewPanel } from "./security-overview-panel";
 import { TargetsPanel } from "./targets-panel";
 
 export default async function DashboardPage() {
@@ -100,6 +101,7 @@ export default async function DashboardPage() {
             )}
           </section>
 
+          <SecurityOverviewPanel enabled={Boolean(activeOrg)} />
           <TargetsPanel
             enabled={Boolean(activeOrg)}
             isAdmin={me?.active_organization_role === "admin"}

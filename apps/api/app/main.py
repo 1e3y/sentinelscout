@@ -15,6 +15,7 @@ from app.api.routes import (
     operations,
     organizations,
     reports,
+    security_overview,
     shared_reports,
     targets,
 )
@@ -68,6 +69,7 @@ def create_app(
     app.include_router(me.router)
     app.include_router(organizations.router)
     app.include_router(targets.router)
+    app.include_router(security_overview.router)
     app.include_router(operations.router)
     app.include_router(candidates.router)
     app.include_router(findings.router)
