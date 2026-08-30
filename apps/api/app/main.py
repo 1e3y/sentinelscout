@@ -13,6 +13,7 @@ from app.api.routes import (
     me,
     notifications,
     operations,
+    organization_members,
     organizations,
     reports,
     security_overview,
@@ -68,6 +69,7 @@ def create_app(
     app.include_router(health.router)
     app.include_router(me.router)
     app.include_router(organizations.router)
+    app.include_router(organization_members.router)
     app.include_router(targets.router)
     app.include_router(security_overview.router)
     app.include_router(operations.router)

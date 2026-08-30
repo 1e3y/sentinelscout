@@ -19,6 +19,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.finding_follow_up import FindingOwnerResponse
+
 # Mirrors app.models.finding.FINDING_STATUSES / FINDING_SEVERITIES, which are
 # enforced by ck_finding_status and ck_finding_severity.
 FindingInboxStatus = Literal["open", "in_progress", "ready_for_retest", "resolved"]
@@ -123,6 +125,8 @@ class FindingInboxRow(BaseModel):
     workflow: FindingInboxWorkflow
     remediation: FindingInboxRemediation
     retests: FindingInboxRetests
+    owner: FindingOwnerResponse | None = None
+    follow_up_due_at: datetime | None = None
     promoted_at: datetime
     last_updated_at: datetime
     attention_reasons: list[FindingInboxAttentionReason] = Field(default_factory=list)

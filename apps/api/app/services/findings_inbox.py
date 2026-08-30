@@ -34,6 +34,8 @@ from app.models.finding_remediation import FindingRemediationRevision
 from app.models.organization import Organization
 from app.models.retest import ACTIVE_RETEST_STATUSES, RetestAttempt
 from app.models.target import AuthorizedTarget
+from app.models.user import User
+from app.schemas.finding_follow_up import FindingOwnerResponse
 from app.schemas.findings_inbox import (
     FindingInboxAttentionReason,
     FindingInboxLatestTerminalRetest,
@@ -45,6 +47,8 @@ from app.schemas.findings_inbox import (
     FindingInboxTarget,
     FindingInboxWorkflow,
 )
+from app.services.clerk import ClerkDirectory
+from app.services.findings.follow_up import batch_owner_membership
 from app.services.findings.retest_state import (
     RETEST_STATE_IN_PROGRESS,
     RETEST_STATE_NONE,
@@ -206,6 +210,8 @@ def _page_statement(
     severity: str | None,
     target_id: UUID | None,
     retest_state: str | None,
+    assigned_to_user_id: UUID | None,
+    unassigned: bool | None,
 ) -> Select:
     """Explicit column list: findings.evidence is never selected."""
     stmt = (
@@ -217,6 +223,8 @@ def _page_statement(
             Finding.created_at.label("promoted_at"),
             Finding.updated_at.label("last_updated_at"),
             Finding.resolved_at,
+            Finding.assigned_to_user_id,
+            Finding.follow_up_due_at,
             SecurityCandidate.candidate_type.label("finding_type"),
             Asset.hostname.label("asset_hostname"),
             AuthorizedTarget.id.label("target_id"),
@@ -240,6 +248,16 @@ def _page_statement(
         stmt = stmt.where(Finding.severity == severity)
     if target_id is not None:
         stmt = stmt.where(AuthorizedTarget.id == target_id)
+    if assigned_to_user_id is not None and unassigned is True:
+        raise HTTPException(
+            status_code=422,
+            detail="assigned_to_user_id and unassigned=true cannot be combined",
+        )
+    if assigned_to_user_id is not None:
+        stmt = stmt.where(Finding.assigned_to_user_id == assigned_to_user_id)
+    if unassigned is True:
+        stmt = stmt.where(Finding.assigned_to_user_id.is_(None))
+    # unassigned=false is accepted as no unassigned filter (explicit no-op).
     if retest_state is not None:
         stmt = _apply_retest_state(stmt, retest_state)
     if cursor:
@@ -395,12 +413,15 @@ def list_findings_inbox(
     db: Session,
     *,
     organization: Organization,
+    directory: ClerkDirectory,
     page_size: int = DEFAULT_PAGE_SIZE,
     cursor: str | None = None,
     finding_status: str | None = None,
     severity: str | None = None,
     target_id: UUID | None = None,
     retest_state: str | None = None,
+    assigned_to_user_id: UUID | None = None,
+    unassigned: bool | None = None,
 ) -> FindingInboxResponse:
     organization_id = organization.id
     size = min(max(page_size, 1), MAX_PAGE_SIZE)
@@ -415,6 +436,8 @@ def list_findings_inbox(
                 severity=severity,
                 target_id=target_id,
                 retest_state=retest_state,
+                assigned_to_user_id=assigned_to_user_id,
+                unassigned=unassigned,
             )
         ).all()
     )
@@ -444,6 +467,19 @@ def list_findings_inbox(
         db, finding_ids=finding_ids
     )
 
+    assignee_ids = {
+        row.assigned_to_user_id for row in page if row.assigned_to_user_id is not None
+    }
+    users_by_id: dict[UUID, User] = {}
+    if assignee_ids:
+        users_by_id = {
+            user.id: user
+            for user in db.scalars(select(User).where(User.id.in_(assignee_ids))).all()
+        }
+    membership_by_id = batch_owner_membership(
+        directory, organization=organization, users=users_by_id
+    )
+
     items: list[FindingInboxRow] = []
     for row in page:
         attempt_count, has_active = rollup.get(row.finding_id, (0, False))
@@ -454,6 +490,15 @@ def list_findings_inbox(
         revision_count, latest_recorded_at = remediation_rollup.get(
             row.finding_id, (0, None)
         )
+        owner: FindingOwnerResponse | None = None
+        if row.assigned_to_user_id is not None:
+            user = users_by_id.get(row.assigned_to_user_id)
+            if user is not None:
+                owner = FindingOwnerResponse(
+                    user_id=user.id,
+                    display_name=user.name,
+                    current_member=membership_by_id.get(user.id, False),
+                )
         items.append(
             FindingInboxRow(
                 finding_id=row.finding_id,
@@ -480,6 +525,8 @@ def list_findings_inbox(
                     attempt_count=attempt_count,
                     latest_terminal=terminal,
                 ),
+                owner=owner,
+                follow_up_due_at=row.follow_up_due_at,
                 promoted_at=row.promoted_at,
                 last_updated_at=row.last_updated_at,
                 attention_reasons=_attention_reasons(

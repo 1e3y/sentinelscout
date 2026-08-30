@@ -548,6 +548,8 @@ export type FindingInboxRow = {
       completed_at: string | null;
     } | null;
   };
+  owner: FindingOwner | null;
+  follow_up_due_at: string | null;
   promoted_at: string;
   last_updated_at: string;
   attention_reasons: FindingInboxAttentionReason[];
@@ -573,6 +575,19 @@ export type FindingInboxFilters = {
   severity?: FindingInboxSeverity | "";
   target_id?: string;
   retest_state?: CurrentRetestState | "";
+  assigned_to_user_id?: string;
+  unassigned?: boolean;
+};
+
+export type FindingOwner = {
+  user_id: string;
+  display_name: string | null;
+  current_member: boolean;
+};
+
+export type FindingFollowUp = {
+  owner: FindingOwner | null;
+  follow_up_due_at: string | null;
 };
 
 export type FindingResponse = {
@@ -591,6 +606,7 @@ export type FindingResponse = {
   remediation_guidance: string;
   evidence: Record<string, unknown>;
   provenance: FindingProvenanceResponse | null;
+  follow_up: FindingFollowUp | null;
   created_at: string;
   updated_at: string;
   resolved_at: string | null;
@@ -640,6 +656,26 @@ export type FindingTimelineEvent =
       details: {
         from_status: FindingInboxStatus;
         to_status: FindingInboxStatus;
+      };
+    }
+  | {
+      event_id: string;
+      event_type: "FOLLOW_UP_CHANGED";
+      occurred_at: string;
+      provenance: "human_workflow";
+      actor: FindingTimelineActor | null;
+      title: string;
+      details: {
+        previous_owner: {
+          user_id: string;
+          display_name: string | null;
+        } | null;
+        new_owner: {
+          user_id: string;
+          display_name: string | null;
+        } | null;
+        previous_due_at: string | null;
+        new_due_at: string | null;
       };
     }
   | {
@@ -1292,6 +1328,9 @@ export function fetchFindingsInbox(
   if (options.severity) params.set("severity", options.severity);
   if (options.target_id) params.set("target_id", options.target_id);
   if (options.retest_state) params.set("retest_state", options.retest_state);
+  if (options.assigned_to_user_id)
+    params.set("assigned_to_user_id", options.assigned_to_user_id);
+  if (options.unassigned === true) params.set("unassigned", "true");
   const query = params.toString();
   return apiFetch<FindingInboxResponse>(
     `/v1/findings/inbox${query ? `?${query}` : ""}`,
@@ -1505,6 +1544,45 @@ export function markFindingReadyForRetest(
     token,
     { method: "POST" },
   );
+}
+
+export type OrganizationMember = {
+  user_id: string;
+  display_name: string | null;
+};
+
+export type OrganizationMembersResponse = {
+  page_size: number;
+  next_cursor: string | null;
+  items: OrganizationMember[];
+};
+
+export function fetchOrganizationMembers(
+  token: string,
+  options: { page_size?: number; cursor?: string | null } = {},
+): Promise<OrganizationMembersResponse> {
+  const params = new URLSearchParams();
+  if (options.page_size != null) params.set("page_size", String(options.page_size));
+  if (options.cursor) params.set("cursor", options.cursor);
+  const query = params.toString();
+  return apiFetch<OrganizationMembersResponse>(
+    `/v1/organization-members${query ? `?${query}` : ""}`,
+    token,
+  );
+}
+
+export function updateFindingFollowUp(
+  token: string,
+  findingId: string,
+  body: {
+    assigned_to_user_id: string | null;
+    follow_up_due_at: string | null;
+  },
+): Promise<FindingFollowUp> {
+  return apiFetch<FindingFollowUp>(`/v1/findings/${findingId}/follow-up`, token, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
 }
 
 export function queueFindingRetest(

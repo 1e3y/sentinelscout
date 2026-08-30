@@ -76,6 +76,11 @@ _AUDIT_METADATA_ALLOWLIST = frozenset(
         "expires_at",
         "creation_origin",
         "delivery_job_id",
+        "follow_up_change_id",
+        "previous_assigned_to_user_id",
+        "new_assigned_to_user_id",
+        "previous_due_at",
+        "new_due_at",
     }
 )
 

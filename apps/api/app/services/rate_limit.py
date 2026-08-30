@@ -20,6 +20,7 @@ ACTION_OPERATION_CREATE = "operation.create"
 ACTION_VALIDATION = "validation.request"
 ACTION_RETEST = "retest.request"
 ACTION_REMEDIATION_RECORD = "finding.remediation_record"
+ACTION_FINDING_FOLLOW_UP = "finding.follow_up"
 ACTION_NOTIFICATION_SETTINGS = "notification.settings"
 ACTION_REPORT_GENERATE = "report.generate"
 ACTION_REPORT_PDF_EXPORT = "report.pdf_export"
@@ -37,6 +38,7 @@ def _limit_for_action(settings: Settings, action: str) -> int:
         ACTION_VALIDATION: settings.rate_limit_validation,
         ACTION_RETEST: settings.rate_limit_retest,
         ACTION_REMEDIATION_RECORD: settings.rate_limit_finding_remediation,
+        ACTION_FINDING_FOLLOW_UP: settings.rate_limit_finding_follow_up,
         ACTION_NOTIFICATION_SETTINGS: settings.rate_limit_notification_settings,
         ACTION_REPORT_GENERATE: settings.rate_limit_report_generate,
         ACTION_REPORT_PDF_EXPORT: settings.rate_limit_report_pdf_export,

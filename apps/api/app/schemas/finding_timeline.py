@@ -86,6 +86,22 @@ class FindingResolvedDetails(BaseModel):
     statement: str
 
 
+class FollowUpOwnerRef(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: UUID
+    display_name: str | None = None
+
+
+class FollowUpChangedDetails(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    previous_owner: FollowUpOwnerRef | None = None
+    new_owner: FollowUpOwnerRef | None = None
+    previous_due_at: datetime | None = None
+    new_due_at: datetime | None = None
+
+
 class TimelineEventBase(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -137,9 +153,16 @@ class FindingResolvedEvent(TimelineEventBase):
     details: FindingResolvedDetails
 
 
+class FollowUpChangedEvent(TimelineEventBase):
+    event_type: Literal["FOLLOW_UP_CHANGED"]
+    provenance: Literal["human_workflow"]
+    details: FollowUpChangedDetails
+
+
 FindingTimelineEvent = Annotated[
     SupportedFindingPromotedEvent
     | RemediationStartedEvent
+    | FollowUpChangedEvent
     | RemediationRevisionRecordedEvent
     | ReadyForRetestEvent
     | RetestQueuedEvent

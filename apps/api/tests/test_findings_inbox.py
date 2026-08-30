@@ -1180,10 +1180,14 @@ def test_inbox_leaks_no_evidence_or_secret_material(
         "workflow",
         "remediation",
         "retests",
+        "owner",
+        "follow_up_due_at",
         "promoted_at",
         "last_updated_at",
         "attention_reasons",
     }
+    assert row["owner"] is None
+    assert row["follow_up_due_at"] is None
     assert set(row["remediation"]) == {
         "revision_count",
         "latest_recorded_at",
@@ -1343,7 +1347,7 @@ def test_mutation_endpoints_keep_their_authorization(
 
 
 def test_query_count_is_bounded_and_no_heavy_tables_are_touched(
-    client, make_token, seed_user_a, dns_resolver, db_session, engine
+    client, make_token, seed_user_a, fake_clerk, dns_resolver, db_session, engine
 ):
     clerk_a, org_a = seed_user_a
     token = make_token(sub=clerk_a, org_id=org_a, org_role="org:admin")
@@ -1421,7 +1425,12 @@ def test_query_count_is_bounded_and_no_heavy_tables_are_touched(
 
         event.listen(engine, "before_cursor_execute", _capture_service)
         try:
-            payload = list_findings_inbox(session, organization=organization, page_size=12)
+            payload = list_findings_inbox(
+                session,
+                organization=organization,
+                directory=fake_clerk,
+                page_size=12,
+            )
         finally:
             event.remove(engine, "before_cursor_execute", _capture_service)
         assert len(payload.items) == 12
@@ -1431,6 +1440,7 @@ def test_query_count_is_bounded_and_no_heavy_tables_are_touched(
             if item.lstrip().lower().startswith("select")
         ]
         # Page + org summary + latest terminal + retest and remediation rollups.
+        # Unassigned page: assignee_ids empty, so no User batch SELECT (would be 6).
         assert len(service_selects) == 5, len(service_selects)
         service_sql = " ".join(service_statements).lower()
         assert "findings.evidence" not in service_sql

@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import binascii
 from base64 import urlsafe_b64decode, urlsafe_b64encode
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy import (
+    DateTime,
     Integer,
     String,
     Text,
@@ -26,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from app.models.audit import AuditEvent
 from app.models.finding import Finding
+from app.models.finding_follow_up import FindingFollowUpChange
 from app.models.finding_remediation import FindingRemediationRevision
 from app.models.retest import ACTIVE_RETEST_STATUSES, RetestAttempt
 from app.models.user import User
@@ -34,6 +36,9 @@ from app.schemas.finding_timeline import (
     FindingResolvedEvent,
     FindingTimelineEvent,
     FindingTimelineResponse,
+    FollowUpChangedDetails,
+    FollowUpChangedEvent,
+    FollowUpOwnerRef,
     ReadyForRetestEvent,
     RemediationRevisionDetails,
     RemediationRevisionRecordedEvent,
@@ -57,6 +62,7 @@ INVALID_TIMELINE_CURSOR_DETAIL = "Invalid finding timeline cursor"
 EVENT_RANKS = {
     "SUPPORTED_FINDING_PROMOTED": 10,
     "REMEDIATION_STARTED": 20,
+    "FOLLOW_UP_CHANGED": 25,
     "REMEDIATION_REVISION_RECORDED": 30,
     "READY_FOR_RETEST": 40,
     "RETEST_QUEUED": 50,
@@ -159,6 +165,10 @@ def _null_int():
     return cast(literal(None), Integer())
 
 
+def _null_timestamptz():
+    return cast(literal(None), DateTime(timezone=True))
+
+
 def _normalized_select(
     *,
     occurred_at,
@@ -175,6 +185,10 @@ def _normalized_select(
     retest_method=None,
     retest_summary=None,
     resolving_retest_id=None,
+    previous_assigned_to_user_id=None,
+    new_assigned_to_user_id=None,
+    previous_due_at=None,
+    new_due_at=None,
 ):
     return select(
         occurred_at.label("occurred_at"),
@@ -209,6 +223,22 @@ def _normalized_select(
             if resolving_retest_id is not None
             else _null_uuid()
         ).label("resolving_retest_id"),
+        (
+            previous_assigned_to_user_id
+            if previous_assigned_to_user_id is not None
+            else _null_uuid()
+        ).label("previous_assigned_to_user_id"),
+        (
+            new_assigned_to_user_id
+            if new_assigned_to_user_id is not None
+            else _null_uuid()
+        ).label("new_assigned_to_user_id"),
+        (
+            previous_due_at if previous_due_at is not None else _null_timestamptz()
+        ).label("previous_due_at"),
+        (new_due_at if new_due_at is not None else _null_timestamptz()).label(
+            "new_due_at"
+        ),
     )
 
 
@@ -351,6 +381,27 @@ def _timeline_statement(
         new_status="ready_for_retest",
     )
 
+    follow_up_changed = _apply_bound(
+        _normalized_select(
+            occurred_at=FindingFollowUpChange.created_at,
+            event_rank=EVENT_RANKS["FOLLOW_UP_CHANGED"],
+            source_uuid=FindingFollowUpChange.id,
+            event_type="FOLLOW_UP_CHANGED",
+            actor_type=literal("user"),
+            actor_user_id=FindingFollowUpChange.changed_by_user_id,
+            previous_assigned_to_user_id=FindingFollowUpChange.previous_assigned_to_user_id,
+            new_assigned_to_user_id=FindingFollowUpChange.new_assigned_to_user_id,
+            previous_due_at=FindingFollowUpChange.previous_due_at,
+            new_due_at=FindingFollowUpChange.new_due_at,
+        ).where(
+            FindingFollowUpChange.finding_id == finding_id,
+            FindingFollowUpChange.organization_id == organization_id,
+        ),
+        event_rank=EVENT_RANKS["FOLLOW_UP_CHANGED"],
+        size=size,
+        cursor_position=cursor_position,
+    )
+
     remediation = _apply_bound(
         _normalized_select(
             occurred_at=FindingRemediationRevision.created_at,
@@ -477,6 +528,7 @@ def _timeline_statement(
     combined = union_all(
         select(promotion),
         select(remediation_started),
+        select(follow_up_changed),
         select(remediation),
         select(ready_for_retest),
         select(queued),
@@ -507,8 +559,46 @@ def _actor(row) -> TimelineActor | None:
     )
 
 
-def _event_from_row(row) -> FindingTimelineEvent:
+def _follow_up_title(
+    *,
+    previous_owner_name: str | None,
+    new_owner_name: str | None,
+    previous_assigned_to_user_id: UUID | None,
+    new_assigned_to_user_id: UUID | None,
+    previous_due_at: datetime | None,
+    new_due_at: datetime | None,
+) -> str:
+    owner_changed = previous_assigned_to_user_id != new_assigned_to_user_id
+    due_changed = previous_due_at != new_due_at
+    parts: list[str] = []
+    if owner_changed:
+        if previous_assigned_to_user_id is None and new_assigned_to_user_id is not None:
+            label = new_owner_name or "an organization member"
+            parts.append(f"Assigned to {label}")
+        elif previous_assigned_to_user_id is not None and new_assigned_to_user_id is None:
+            parts.append("Follow-up assignment cleared")
+        else:
+            from_label = previous_owner_name or "an organization member"
+            to_label = new_owner_name or "an organization member"
+            parts.append(f"Owner changed from {from_label} to {to_label}")
+    if due_changed:
+        if previous_due_at is None and new_due_at is not None:
+            due_label = new_due_at.astimezone(timezone.utc).strftime(
+                "%Y-%m-%d %H:%M UTC"
+            )
+            parts.append(f"Follow-up due date set to {due_label}")
+        elif previous_due_at is not None and new_due_at is None:
+            parts.append("Follow-up due date cleared")
+        else:
+            parts.append("Follow-up due date updated")
+    return "; ".join(parts) if parts else "Follow-up updated"
+
+
+def _event_from_row(
+    row, *, owner_names: dict[UUID, str | None] | None = None
+) -> FindingTimelineEvent:
     actor = _actor(row)
+    names = owner_names or {}
     if row.event_type == "SUPPORTED_FINDING_PROMOTED":
         return SupportedFindingPromotedEvent(
             event_id="supported-finding-promoted",
@@ -529,6 +619,42 @@ def _event_from_row(row) -> FindingTimelineEvent:
             title="Remediation workflow started",
             details=WorkflowTransitionDetails(
                 from_status=row.from_status, to_status=row.to_status
+            ),
+        )
+    if row.event_type == "FOLLOW_UP_CHANGED":
+        previous_owner = None
+        if row.previous_assigned_to_user_id is not None:
+            previous_owner = FollowUpOwnerRef(
+                user_id=row.previous_assigned_to_user_id,
+                display_name=names.get(row.previous_assigned_to_user_id),
+            )
+        new_owner = None
+        if row.new_assigned_to_user_id is not None:
+            new_owner = FollowUpOwnerRef(
+                user_id=row.new_assigned_to_user_id,
+                display_name=names.get(row.new_assigned_to_user_id),
+            )
+        return FollowUpChangedEvent(
+            event_id=f"follow-up-changed:{row.source_uuid}",
+            event_type=row.event_type,
+            occurred_at=row.occurred_at,
+            provenance="human_workflow",
+            actor=actor,
+            title=_follow_up_title(
+                previous_owner_name=(
+                    previous_owner.display_name if previous_owner else None
+                ),
+                new_owner_name=new_owner.display_name if new_owner else None,
+                previous_assigned_to_user_id=row.previous_assigned_to_user_id,
+                new_assigned_to_user_id=row.new_assigned_to_user_id,
+                previous_due_at=row.previous_due_at,
+                new_due_at=row.new_due_at,
+            ),
+            details=FollowUpChangedDetails(
+                previous_owner=previous_owner,
+                new_owner=new_owner,
+                previous_due_at=row.previous_due_at,
+                new_due_at=row.new_due_at,
             ),
         )
     if row.event_type == "REMEDIATION_REVISION_RECORDED":
@@ -815,6 +941,20 @@ def list_finding_timeline(
             event_rank=last.event_rank,
             source_uuid=last.source_uuid,
         )
+    owner_ids: set[UUID] = set()
+    for row in page:
+        if row.event_type != "FOLLOW_UP_CHANGED":
+            continue
+        if row.previous_assigned_to_user_id is not None:
+            owner_ids.add(row.previous_assigned_to_user_id)
+        if row.new_assigned_to_user_id is not None:
+            owner_ids.add(row.new_assigned_to_user_id)
+    owner_names: dict[UUID, str | None] = {}
+    if owner_ids:
+        owner_names = {
+            user.id: user.name
+            for user in db.scalars(select(User).where(User.id.in_(owner_ids))).all()
+        }
     return FindingTimelineResponse(
         finding_id=finding.id,
         current_status=finding.status,
@@ -824,5 +964,5 @@ def list_finding_timeline(
         history_gaps=gaps,
         page_size=size,
         next_cursor=next_cursor,
-        events=[_event_from_row(row) for row in page],
+        events=[_event_from_row(row, owner_names=owner_names) for row in page],
     )

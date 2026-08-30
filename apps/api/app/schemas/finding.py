@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.audit import FindingProvenanceResponse
+from app.schemas.finding_follow_up import FindingFollowUpResponse
 
 
 class FindingResponse(BaseModel):
@@ -25,6 +26,7 @@ class FindingResponse(BaseModel):
     remediation_guidance: str
     evidence: dict[str, Any] = Field(default_factory=dict)
     provenance: FindingProvenanceResponse | None = None
+    follow_up: FindingFollowUpResponse | None = None
     created_at: datetime
     updated_at: datetime
     resolved_at: datetime | None = None

@@ -6,12 +6,15 @@ import { FindingActivityTimeline } from "./finding-activity-timeline";
 import {
   fetchFinding,
   fetchFindingTimeline,
+  fetchOrganizationMembers,
   markFindingReadyForRetest,
   queueFindingRetest,
   recordFindingRemediation,
   startFindingRemediation,
+  updateFindingFollowUp,
   type FindingResponse,
   type FindingTimelineResponse,
+  type OrganizationMember,
 } from "@/lib/api";
 
 type Props = {
@@ -37,6 +40,17 @@ function statusLabel(status: string): string {
   }
 }
 
+function dueWording(
+  dueAt: string | null | undefined,
+  status: string,
+): string | null {
+  if (!dueAt) return null;
+  if (status === "resolved") return null;
+  const due = new Date(dueAt).getTime();
+  if (Number.isNaN(due)) return null;
+  return due <= Date.now() ? "Overdue" : "Upcoming";
+}
+
 /**
  * Detail and workflow actions for one finding. The organization-scoped
  * collection lives in FindingsInboxPanel; this panel never lists findings, so
@@ -47,6 +61,9 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
   const [selected, setSelected] = useState<FindingResponse | null>(null);
   const [timeline, setTimeline] = useState<FindingTimelineResponse | null>(null);
   const [remediationSummary, setRemediationSummary] = useState("");
+  const [members, setMembers] = useState<OrganizationMember[]>([]);
+  const [ownerDraft, setOwnerDraft] = useState("");
+  const [dueDraft, setDueDraft] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -61,6 +78,8 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
         setSelected(null);
         setTimeline(null);
         setRemediationSummary("");
+        setOwnerDraft("");
+        setDueDraft("");
         return;
       }
       try {
@@ -69,13 +88,23 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
           setError("Missing session token");
           return;
         }
-        const [finding, activity] = await Promise.all([
+        const [finding, activity, memberPage] = await Promise.all([
           fetchFinding(token, findingId),
           fetchFindingTimeline(token, findingId),
+          fetchOrganizationMembers(token, { page_size: 100 }),
         ]);
         setSelected(finding);
         setTimeline(activity);
+        setMembers(memberPage.items);
         setRemediationSummary("");
+        setOwnerDraft(finding.follow_up?.owner?.user_id ?? "");
+        setDueDraft(
+          finding.follow_up?.follow_up_due_at
+            ? new Date(finding.follow_up.follow_up_due_at)
+                .toISOString()
+                .slice(0, 16)
+            : "",
+        );
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load finding");
       }
@@ -118,6 +147,11 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
 
   function saveRemediationRevision() {
     if (!selected) return;
+    const summary = remediationSummary.trim();
+    if (!summary) {
+      setError("Remediation summary is required");
+      return;
+    }
     startTransition(async () => {
       setError(null);
       setMessage(null);
@@ -127,16 +161,48 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
           setError("Missing session token");
           return;
         }
-        await recordFindingRemediation(token, selected.id, remediationSummary);
-        const activity = await fetchFindingTimeline(token, selected.id);
-        setTimeline(activity);
+        await recordFindingRemediation(token, selected.id, summary);
+        setMessage("Remediation revision recorded");
         setRemediationSummary("");
-        setMessage("Remediation recorded.");
+        const [finding, activity] = await Promise.all([
+          fetchFinding(token, selected.id),
+          fetchFindingTimeline(token, selected.id),
+        ]);
+        setSelected(finding);
+        setTimeline(activity);
         onFindingChanged();
       } catch (err) {
         setError(
           err instanceof Error ? err.message : "Failed to record remediation",
         );
+      }
+    });
+  }
+
+  function saveFollowUp() {
+    if (!selected || selected.status === "resolved") return;
+    startTransition(async () => {
+      setError(null);
+      setMessage(null);
+      try {
+        const token = await getToken();
+        if (!token) {
+          setError("Missing session token");
+          return;
+        }
+        const followUp = await updateFindingFollowUp(token, selected.id, {
+          assigned_to_user_id: ownerDraft || null,
+          follow_up_due_at: dueDraft
+            ? new Date(dueDraft).toISOString()
+            : null,
+        });
+        setSelected({ ...selected, follow_up: followUp });
+        setMessage("Follow-up saved");
+        const activity = await fetchFindingTimeline(token, selected.id);
+        setTimeline(activity);
+        onFindingChanged();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to save follow-up");
       }
     });
   }
@@ -315,6 +381,99 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
               </dl>
             </div>
           ) : null}
+
+          <div className="space-y-3 border-t border-zinc-100 pt-4">
+            <div>
+              <h4 className="text-sm font-medium text-zinc-800">Follow-up</h4>
+              <p className="text-xs text-zinc-600">
+                Optional owner and due date for operational follow-up. Not a
+                severity SLA and not verification.
+              </p>
+            </div>
+            {selected.status === "resolved" ? (
+              <dl className="grid gap-2 text-xs text-zinc-700 sm:grid-cols-2">
+                <div>
+                  <dt className="text-zinc-500">Owner</dt>
+                  <dd>
+                    {selected.follow_up?.owner
+                      ? selected.follow_up.owner.current_member
+                        ? (selected.follow_up.owner.display_name ??
+                          "Organization member")
+                        : `${selected.follow_up.owner.display_name ?? "Organization member"} (no longer a member)`
+                      : "Unassigned"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-zinc-500">Due</dt>
+                  <dd>
+                    {formatTime(selected.follow_up?.follow_up_due_at)}
+                  </dd>
+                </div>
+              </dl>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="text-xs text-zinc-700">
+                  <span className="text-zinc-500">Owner</span>
+                  <select
+                    className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                    value={ownerDraft}
+                    disabled={pending}
+                    onChange={(event) => setOwnerDraft(event.target.value)}
+                  >
+                    <option value="">Unassigned</option>
+                    {members.map((member) => (
+                      <option key={member.user_id} value={member.user_id}>
+                        {member.display_name ?? "Organization member"}
+                      </option>
+                    ))}
+                    {selected.follow_up?.owner &&
+                    !selected.follow_up.owner.current_member &&
+                    !members.some(
+                      (member) =>
+                        member.user_id === selected.follow_up?.owner?.user_id,
+                    ) ? (
+                      <option value={selected.follow_up.owner.user_id}>
+                        {(selected.follow_up.owner.display_name ??
+                          "Organization member") + " (no longer a member)"}
+                      </option>
+                    ) : null}
+                  </select>
+                </label>
+                <label className="text-xs text-zinc-700">
+                  <span className="text-zinc-500">Due date</span>
+                  <input
+                    type="datetime-local"
+                    className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                    value={dueDraft}
+                    disabled={pending}
+                    onChange={(event) => setDueDraft(event.target.value)}
+                  />
+                </label>
+                <div className="sm:col-span-2">
+                  {dueWording(
+                    selected.follow_up?.follow_up_due_at,
+                    selected.status,
+                  ) ? (
+                    <p className="mb-2 text-xs text-zinc-600">
+                      Current due state:{" "}
+                      {dueWording(
+                        selected.follow_up?.follow_up_due_at,
+                        selected.status,
+                      )}
+                    </p>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm disabled:opacity-50"
+                    disabled={pending}
+                    onClick={saveFollowUp}
+                  >
+                    Save follow-up
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
 
           {timeline ? (
             <FindingActivityTimeline

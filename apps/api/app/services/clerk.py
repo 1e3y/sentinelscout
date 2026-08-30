@@ -24,10 +24,28 @@ class ClerkOrgMembership:
     role: str
 
 
+@dataclass(frozen=True)
+class ClerkOrganizationMember:
+    """One member of a Clerk organization (org-scoped directory row)."""
+
+    clerk_user_id: str
+    email: str
+    name: str | None
+    email_verified: bool = False
+
+
 class ClerkDirectory(Protocol):
     def get_user(self, clerk_user_id: str) -> ClerkUserInfo: ...
 
     def list_organization_memberships(self, clerk_user_id: str) -> list[ClerkOrgMembership]: ...
+
+    def list_organization_members(
+        self,
+        clerk_org_id: str,
+        *,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[ClerkOrganizationMember], int]: ...
 
 
 class HttpClerkDirectory:
@@ -105,6 +123,74 @@ class HttpClerkDirectory:
                     )
                 )
         return memberships
+
+    def list_organization_members(
+        self,
+        clerk_org_id: str,
+        *,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[ClerkOrganizationMember], int]:
+        """Authoritative org roster from Clerk Backend API (paginated)."""
+        if not self._settings.clerk_secret_key:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="CLERK_SECRET_KEY is not configured",
+            )
+        if limit < 1 or offset < 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid organization member page",
+            )
+        response = self._client.get(
+            f"/organizations/{clerk_org_id}/organization_memberships",
+            params={"limit": limit, "offset": offset},
+        )
+        if response.status_code >= 400:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Failed to fetch organization members from Clerk",
+            )
+        payload = response.json()
+        items = payload.get("data", payload if isinstance(payload, list) else [])
+        total_raw = payload.get("total_count")
+        members: list[ClerkOrganizationMember] = []
+        for item in items:
+            public_user = item.get("public_user_data") or {}
+            clerk_user_id = public_user.get("user_id")
+            if not isinstance(clerk_user_id, str) or not clerk_user_id:
+                continue
+            identifier = public_user.get("identifier")
+            email = identifier if isinstance(identifier, str) and identifier else None
+            if email is None:
+                # Identifier missing: fall back to full user fetch for required email.
+                info = self.get_user(clerk_user_id)
+                members.append(
+                    ClerkOrganizationMember(
+                        clerk_user_id=info.clerk_user_id,
+                        email=info.email,
+                        name=info.name,
+                        email_verified=info.email_verified,
+                    )
+                )
+                continue
+            first = public_user.get("first_name") or ""
+            last = public_user.get("last_name") or ""
+            full = f"{first} {last}".strip()
+            name = full or None
+            members.append(
+                ClerkOrganizationMember(
+                    clerk_user_id=clerk_user_id,
+                    email=email,
+                    name=name,
+                    email_verified=False,
+                )
+            )
+        if isinstance(total_raw, int) and total_raw >= 0:
+            total = total_raw
+        else:
+            total = offset + len(members)
+        return members, total
 
 
 def primary_email_info(data: dict) -> tuple[str, bool]:

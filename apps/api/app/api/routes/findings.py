@@ -5,10 +5,21 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import AuthContext, get_auth_context, get_db, require_active_org_actor
+from app.api.deps import (
+    AuthContext,
+    get_auth_context,
+    get_clerk_directory,
+    get_db,
+    require_active_org_actor,
+)
 from app.models.asset import Asset
+from app.models.organization import Organization
 from app.schemas.audit import FindingProvenanceResponse
 from app.schemas.finding import FindingResponse
+from app.schemas.finding_follow_up import (
+    FindingFollowUpResponse,
+    UpdateFindingFollowUpRequest,
+)
 from app.schemas.finding_remediation import (
     CreateFindingRemediationRevisionRequest,
     FindingRemediationHistoryResponse,
@@ -23,6 +34,7 @@ from app.schemas.findings_inbox import (
 )
 from app.schemas.retest import RetestAttemptResponse
 from app.services.authorization import assert_actor_org
+from app.services.clerk import ClerkDirectory
 from app.services.findings import (
     get_finding_or_404,
     list_finding_timeline,
@@ -31,7 +43,9 @@ from app.services.findings import (
     mark_ready_for_retest,
     record_remediation_revision,
     start_remediation,
+    update_finding_follow_up,
 )
+from app.services.findings.follow_up import resolve_follow_up_response
 from app.services.findings.remediation_record import (
     DEFAULT_REMEDIATION_PAGE_SIZE,
     MAX_REMEDIATION_PAGE_SIZE,
@@ -47,6 +61,7 @@ from app.services.findings_inbox import (
 )
 from app.services.provenance import build_finding_provenance
 from app.services.rate_limit import (
+    ACTION_FINDING_FOLLOW_UP,
     ACTION_REMEDIATION_RECORD,
     ACTION_RETEST,
     enforce_rate_limit,
@@ -58,11 +73,27 @@ router = APIRouter(prefix="/v1/findings", tags=["findings"])
 
 
 def _to_finding_response(
-    db: Session, finding, asset: Asset | None = None
+    db: Session,
+    finding,
+    asset: Asset | None = None,
+    *,
+    directory: ClerkDirectory | None = None,
+    organization: Organization | None = None,
 ) -> FindingResponse:
     provenance = FindingProvenanceResponse.model_validate(
         build_finding_provenance(db, finding)
     )
+    follow_up: FindingFollowUpResponse | None = None
+    if directory is not None and organization is not None:
+        follow_up = resolve_follow_up_response(
+            db,
+            directory=directory,
+            organization=organization,
+            assigned_to_user_id=finding.assigned_to_user_id,
+            follow_up_due_at=finding.follow_up_due_at,
+        )
+    elif finding.assigned_to_user_id is None and finding.follow_up_due_at is None:
+        follow_up = FindingFollowUpResponse(owner=None, follow_up_due_at=None)
     return FindingResponse(
         id=finding.id,
         organization_id=finding.organization_id,
@@ -79,6 +110,7 @@ def _to_finding_response(
         remediation_guidance=finding.remediation_guidance,
         evidence=dict(finding.evidence or {}),
         provenance=provenance,
+        follow_up=follow_up,
         created_at=finding.created_at,
         updated_at=finding.updated_at,
         resolved_at=finding.resolved_at,
@@ -99,11 +131,23 @@ def _assets_by_id(db: Session, findings) -> dict[UUID, Asset]:
 def list_findings_endpoint(
     auth: Annotated[AuthContext, Depends(get_auth_context)],
     db: Annotated[Session, Depends(get_db)],
+    directory: Annotated[ClerkDirectory, Depends(get_clerk_directory)],
 ) -> list[FindingResponse]:
     findings = list_findings_for_user(db, user_id=auth.user.id)
     assets = _assets_by_id(db, findings)
+    org_ids = {row.organization_id for row in findings}
+    orgs = {
+        org.id: org
+        for org in db.scalars(select(Organization).where(Organization.id.in_(org_ids))).all()
+    } if org_ids else {}
     return [
-        _to_finding_response(db, finding, assets.get(finding.asset_id))
+        _to_finding_response(
+            db,
+            finding,
+            assets.get(finding.asset_id),
+            directory=directory,
+            organization=orgs.get(finding.organization_id),
+        )
         for finding in findings
     ]
 
@@ -114,12 +158,15 @@ def list_findings_endpoint(
 def findings_inbox_endpoint(
     auth: Annotated[AuthContext, Depends(get_auth_context)],
     db: Annotated[Session, Depends(get_db)],
+    directory: Annotated[ClerkDirectory, Depends(get_clerk_directory)],
     page_size: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
     cursor: str | None = None,
     status: FindingInboxStatus | None = None,
     severity: FindingInboxSeverity | None = None,
     target_id: UUID | None = None,
     retest_state: CurrentRetestState | None = None,
+    assigned_to_user_id: UUID | None = None,
+    unassigned: bool | None = None,
 ) -> FindingInboxResponse:
     """Current findings for the caller's active organization. Members and admins alike."""
     require_active_organization(auth)
@@ -127,12 +174,15 @@ def findings_inbox_endpoint(
     return list_findings_inbox(
         db,
         organization=auth.active_organization,
+        directory=directory,
         page_size=page_size,
         cursor=cursor,
         finding_status=status,
         severity=severity,
         target_id=target_id,
         retest_state=retest_state,
+        assigned_to_user_id=assigned_to_user_id,
+        unassigned=unassigned,
     )
 
 
@@ -141,10 +191,42 @@ def get_finding_endpoint(
     finding_id: UUID,
     auth: Annotated[AuthContext, Depends(get_auth_context)],
     db: Annotated[Session, Depends(get_db)],
+    directory: Annotated[ClerkDirectory, Depends(get_clerk_directory)],
 ) -> FindingResponse:
     finding = get_finding_or_404(db, finding_id=finding_id, user_id=auth.user.id)
     asset = db.get(Asset, finding.asset_id)
-    return _to_finding_response(db, finding, asset)
+    organization = db.get(Organization, finding.organization_id)
+    return _to_finding_response(
+        db, finding, asset, directory=directory, organization=organization
+    )
+
+
+@router.put("/{finding_id}/follow-up", response_model=FindingFollowUpResponse)
+def update_finding_follow_up_endpoint(
+    finding_id: UUID,
+    body: UpdateFindingFollowUpRequest,
+    auth: Annotated[AuthContext, Depends(get_auth_context)],
+    db: Annotated[Session, Depends(get_db)],
+    directory: Annotated[ClerkDirectory, Depends(get_clerk_directory)],
+) -> FindingFollowUpResponse:
+    actor = require_active_org_actor(auth)
+    finding = get_finding_or_404(db, finding_id=finding_id, user_id=actor.user_id)
+    assert_actor_org(actor, finding.organization_id, not_found="Finding not found")
+    enforce_rate_limit(
+        db,
+        organization_id=finding.organization_id,
+        user_id=actor.user_id,
+        action=ACTION_FINDING_FOLLOW_UP,
+    )
+    result = update_finding_follow_up(
+        db,
+        finding_id=finding.id,
+        actor=actor,
+        directory=directory,
+        assigned_to_user_id=body.assigned_to_user_id,
+        follow_up_due_at=body.follow_up_due_at,
+    )
+    return result.follow_up
 
 
 @router.get("/{finding_id}/timeline", response_model=FindingTimelineResponse)
@@ -232,11 +314,15 @@ def start_remediation_endpoint(
     finding_id: UUID,
     auth: Annotated[AuthContext, Depends(get_auth_context)],
     db: Annotated[Session, Depends(get_db)],
+    directory: Annotated[ClerkDirectory, Depends(get_clerk_directory)],
 ) -> FindingResponse:
     actor = require_active_org_actor(auth)
     finding = start_remediation(db, finding_id=finding_id, actor=actor)
     asset = db.get(Asset, finding.asset_id)
-    return _to_finding_response(db, finding, asset)
+    organization = db.get(Organization, finding.organization_id)
+    return _to_finding_response(
+        db, finding, asset, directory=directory, organization=organization
+    )
 
 
 @router.post("/{finding_id}/ready-for-retest", response_model=FindingResponse)
@@ -244,11 +330,15 @@ def ready_for_retest_endpoint(
     finding_id: UUID,
     auth: Annotated[AuthContext, Depends(get_auth_context)],
     db: Annotated[Session, Depends(get_db)],
+    directory: Annotated[ClerkDirectory, Depends(get_clerk_directory)],
 ) -> FindingResponse:
     actor = require_active_org_actor(auth)
     finding = mark_ready_for_retest(db, finding_id=finding_id, actor=actor)
     asset = db.get(Asset, finding.asset_id)
-    return _to_finding_response(db, finding, asset)
+    organization = db.get(Organization, finding.organization_id)
+    return _to_finding_response(
+        db, finding, asset, directory=directory, organization=organization
+    )
 
 
 def _to_retest_response(attempt) -> RetestAttemptResponse:

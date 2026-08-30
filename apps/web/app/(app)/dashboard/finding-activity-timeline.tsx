@@ -63,6 +63,25 @@ function EventDetails({ event }: { event: FindingTimelineEvent }) {
           {stateLabel(event.details.to_status)}
         </p>
       );
+    case "FOLLOW_UP_CHANGED": {
+      const prevOwner =
+        event.details.previous_owner?.display_name ??
+        (event.details.previous_owner ? "Organization member" : "Unassigned");
+      const nextOwner =
+        event.details.new_owner?.display_name ??
+        (event.details.new_owner ? "Organization member" : "Unassigned");
+      return (
+        <div className="space-y-1 text-xs text-zinc-600">
+          <p>
+            Owner: {prevOwner} → {nextOwner}
+          </p>
+          <p>
+            Due: {formatTime(event.details.previous_due_at ?? "")} →{" "}
+            {formatTime(event.details.new_due_at ?? "")}
+          </p>
+        </div>
+      );
+    }
     case "REMEDIATION_REVISION_RECORDED":
       return (
         <div className="space-y-1">

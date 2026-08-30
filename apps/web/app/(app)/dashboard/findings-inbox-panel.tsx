@@ -80,7 +80,22 @@ const EMPTY_FILTERS: FindingInboxFilters = {
   status: "",
   severity: "",
   retest_state: "",
+  unassigned: undefined,
 };
+
+function ownerLabel(row: FindingInboxRow): string {
+  if (!row.owner) return "Unassigned";
+  const name = row.owner.display_name ?? "Organization member";
+  return row.owner.current_member ? name : `${name} (no longer a member)`;
+}
+
+function dueLabel(row: FindingInboxRow): string {
+  if (!row.follow_up_due_at) return "—";
+  const when = formatTime(row.follow_up_due_at);
+  if (row.status === "resolved") return when;
+  const overdue = new Date(row.follow_up_due_at).getTime() <= Date.now();
+  return `${when} (${overdue ? "overdue" : "upcoming"})`;
+}
 
 export function FindingsInboxPanel({
   enabled,
@@ -258,6 +273,23 @@ export function FindingsInboxPanel({
                 ))}
               </select>
             </label>
+            <label className="flex items-center gap-2 text-sm text-zinc-700">
+              <input
+                type="checkbox"
+                checked={filters.unassigned === true}
+                disabled={pending}
+                onChange={(event) =>
+                  setFilters((prev) => ({
+                    ...prev,
+                    unassigned: event.target.checked ? true : undefined,
+                    assigned_to_user_id: event.target.checked
+                      ? undefined
+                      : prev.assigned_to_user_id,
+                  }))
+                }
+              />
+              Unassigned only
+            </label>
           </div>
 
           {rows.length === 0 ? (
@@ -330,6 +362,14 @@ export function FindingsInboxPanel({
                                 )}`
                               : ""}
                           </dd>
+                        </div>
+                        <div className="flex gap-1">
+                          <dt className="text-zinc-500">Owner:</dt>
+                          <dd>{ownerLabel(row)}</dd>
+                        </div>
+                        <div className="flex gap-1">
+                          <dt className="text-zinc-500">Follow-up due:</dt>
+                          <dd>{dueLabel(row)}</dd>
                         </div>
                         <div className="flex gap-1">
                           <dt className="text-zinc-500">Target:</dt>

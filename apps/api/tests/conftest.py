@@ -36,7 +36,11 @@ from app.core.config import get_settings, reset_settings_cache
 from app.core.db import Base, get_db
 from app.core.security import StaticKeyTokenVerifier
 from app.main import create_app
-from app.services.clerk import ClerkOrgMembership, ClerkUserInfo
+from app.services.clerk import (
+    ClerkOrgMembership,
+    ClerkOrganizationMember,
+    ClerkUserInfo,
+)
 from app.services.dns import StaticDnsTxtResolver
 
 reset_settings_cache()
@@ -52,6 +56,33 @@ class FakeClerkDirectory:
 
     def list_organization_memberships(self, clerk_user_id: str) -> list[ClerkOrgMembership]:
         return list(self.memberships.get(clerk_user_id, []))
+
+    def list_organization_members(
+        self,
+        clerk_org_id: str,
+        *,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[ClerkOrganizationMember], int]:
+        """Derive org roster from the same membership map used for assignability."""
+        members: list[ClerkOrganizationMember] = []
+        for clerk_user_id, rows in self.memberships.items():
+            if not any(row.clerk_org_id == clerk_org_id for row in rows):
+                continue
+            info = self.users[clerk_user_id]
+            members.append(
+                ClerkOrganizationMember(
+                    clerk_user_id=info.clerk_user_id,
+                    email=info.email,
+                    name=info.name,
+                    email_verified=info.email_verified,
+                )
+            )
+        members.sort(key=lambda row: row.clerk_user_id)
+        total = len(members)
+        if limit < 1 or offset < 0:
+            return [], total
+        return members[offset : offset + limit], total
 
 
 @pytest.fixture(scope="session")

@@ -1,3 +1,4 @@
+from app.services.findings.follow_up import update_finding_follow_up
 from app.services.findings.promote import promote_candidate_to_finding
 from app.services.findings.remediation import (
     get_finding_or_404,
@@ -20,4 +21,5 @@ __all__ = [
     "promote_candidate_to_finding",
     "record_remediation_revision",
     "start_remediation",
+    "update_finding_follow_up",
 ]

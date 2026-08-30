@@ -74,6 +74,9 @@ class Settings(BaseSettings):
     rate_limit_finding_remediation: int = Field(
         default=30, alias="RATE_LIMIT_FINDING_REMEDIATION"
     )
+    rate_limit_finding_follow_up: int = Field(
+        default=30, alias="RATE_LIMIT_FINDING_FOLLOW_UP"
+    )
     rate_limit_notification_settings: int = Field(
         default=30, alias="RATE_LIMIT_NOTIFICATION_SETTINGS"
     )
