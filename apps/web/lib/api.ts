@@ -479,6 +479,98 @@ export type FindingProvenanceResponse = {
   } | null;
 };
 
+export type FindingInboxStatus =
+  | "open"
+  | "in_progress"
+  | "ready_for_retest"
+  | "resolved";
+
+export type FindingInboxSeverity =
+  | "informational"
+  | "low"
+  | "medium"
+  | "high"
+  | "critical";
+
+export type TargetAuthorizationStatus =
+  | "unverified"
+  | "verification_pending"
+  | "verified"
+  | "revoked";
+
+export type FindingWorkflowState =
+  | "not_started"
+  | "in_progress"
+  | "ready_for_retest"
+  | "resolved_by_retest";
+
+export type TerminalRetestStatus =
+  | "passed"
+  | "failed"
+  | "inconclusive"
+  | "error";
+
+export type CurrentRetestState = "none" | "in_progress" | TerminalRetestStatus;
+
+export type FindingInboxAttentionReason = {
+  code: string;
+  label: string;
+  provenance: "finding_workflow" | "retest_state" | "target_authorization";
+};
+
+export type FindingInboxRow = {
+  finding_id: string;
+  target: {
+    target_id: string;
+    domain: string;
+    authorization_status: TargetAuthorizationStatus;
+    asset_hostname: string;
+  };
+  title: string;
+  finding_type: string;
+  severity: FindingInboxSeverity;
+  status: FindingInboxStatus;
+  workflow: {
+    state: FindingWorkflowState;
+    resolved_at: string | null;
+  };
+  retests: {
+    current_state: CurrentRetestState;
+    attempt_count: number;
+    latest_terminal: {
+      retest_attempt_id: string;
+      status: TerminalRetestStatus;
+      created_at: string;
+      completed_at: string | null;
+    } | null;
+  };
+  promoted_at: string;
+  last_updated_at: string;
+  attention_reasons: FindingInboxAttentionReason[];
+};
+
+export type FindingInboxResponse = {
+  organization_id: string;
+  state: "current";
+  page_size: number;
+  sort: "promoted_at_desc";
+  next_cursor: string | null;
+  summary: {
+    scope: "organization";
+    finding_count: number;
+    open_finding_count: number;
+    findings_without_any_retest: number;
+  };
+  items: FindingInboxRow[];
+};
+
+export type FindingInboxFilters = {
+  status?: FindingInboxStatus | "";
+  severity?: FindingInboxSeverity | "";
+  target_id?: string;
+  retest_state?: CurrentRetestState | "";
+};
+
 export type FindingResponse = {
   id: string;
   organization_id: string;
@@ -1047,8 +1139,33 @@ export function promoteCandidate(
   });
 }
 
+/**
+ * Legacy cross-membership finding list. Kept for backward compatibility only;
+ * the dashboard's organization-scoped collection is fetchFindingsInbox.
+ */
 export function fetchFindings(token: string): Promise<FindingResponse[]> {
   return apiFetch<FindingResponse[]>("/v1/findings", token);
+}
+
+export function fetchFindingsInbox(
+  token: string,
+  options: {
+    page_size?: number;
+    cursor?: string | null;
+  } & FindingInboxFilters = {},
+): Promise<FindingInboxResponse> {
+  const params = new URLSearchParams();
+  if (options.page_size != null) params.set("page_size", String(options.page_size));
+  if (options.cursor) params.set("cursor", options.cursor);
+  if (options.status) params.set("status", options.status);
+  if (options.severity) params.set("severity", options.severity);
+  if (options.target_id) params.set("target_id", options.target_id);
+  if (options.retest_state) params.set("retest_state", options.retest_state);
+  const query = params.toString();
+  return apiFetch<FindingInboxResponse>(
+    `/v1/findings/inbox${query ? `?${query}` : ""}`,
+    token,
+  );
 }
 
 export type AlertDeliveryStatus = {

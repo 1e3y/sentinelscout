@@ -4,7 +4,16 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -38,6 +47,14 @@ class Finding(Base):
         CheckConstraint(
             "severity IN ('informational', 'low', 'medium', 'high', 'critical')",
             name="ck_finding_severity",
+        ),
+        # Keyset order for the organization findings inbox (M30).
+        Index(
+            "ix_findings_org_created_at_id",
+            "organization_id",
+            "created_at",
+            "id",
+            postgresql_ops={"created_at": "DESC", "id": "DESC"},
         ),
     )
 

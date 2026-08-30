@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -9,6 +9,12 @@ from app.api.deps import AuthContext, get_auth_context, get_db, require_active_o
 from app.models.asset import Asset
 from app.schemas.audit import FindingProvenanceResponse
 from app.schemas.finding import FindingResponse
+from app.schemas.findings_inbox import (
+    CurrentRetestState,
+    FindingInboxResponse,
+    FindingInboxSeverity,
+    FindingInboxStatus,
+)
 from app.schemas.retest import RetestAttemptResponse
 from app.services.authorization import assert_actor_org
 from app.services.findings import (
@@ -17,9 +23,15 @@ from app.services.findings import (
     mark_ready_for_retest,
     start_remediation,
 )
+from app.services.findings_inbox import (
+    DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+    list_findings_inbox,
+)
 from app.services.provenance import build_finding_provenance
 from app.services.rate_limit import ACTION_RETEST, enforce_rate_limit
 from app.services.retest_runtime import list_finding_retests, queue_finding_retest
+from app.services.targets import require_active_organization
 
 router = APIRouter(prefix="/v1/findings", tags=["findings"])
 
@@ -73,6 +85,34 @@ def list_findings_endpoint(
         _to_finding_response(db, finding, assets.get(finding.asset_id))
         for finding in findings
     ]
+
+
+# Must stay above "/{finding_id}": that path converts to UUID, so a later
+# declaration order would turn /v1/findings/inbox into a 422.
+@router.get("/inbox", response_model=FindingInboxResponse)
+def findings_inbox_endpoint(
+    auth: Annotated[AuthContext, Depends(get_auth_context)],
+    db: Annotated[Session, Depends(get_db)],
+    page_size: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
+    cursor: str | None = None,
+    status: FindingInboxStatus | None = None,
+    severity: FindingInboxSeverity | None = None,
+    target_id: UUID | None = None,
+    retest_state: CurrentRetestState | None = None,
+) -> FindingInboxResponse:
+    """Current findings for the caller's active organization. Members and admins alike."""
+    require_active_organization(auth)
+    assert auth.active_organization is not None
+    return list_findings_inbox(
+        db,
+        organization=auth.active_organization,
+        page_size=page_size,
+        cursor=cursor,
+        finding_status=status,
+        severity=severity,
+        target_id=target_id,
+        retest_state=retest_state,
+    )
 
 
 @router.get("/{finding_id}", response_model=FindingResponse)

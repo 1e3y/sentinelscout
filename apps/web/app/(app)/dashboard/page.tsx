@@ -5,7 +5,7 @@ import { fetchMe, fetchOrganizations } from "@/lib/api";
 import { AlertsPanel } from "./alerts-panel";
 import { AssessmentHistoryPanel } from "./assessment-history-panel";
 import { AuditPanel } from "./audit-panel";
-import { FindingsPanel } from "./findings-panel";
+import { FindingsSection } from "./findings-section";
 import { MonitoringPanel } from "./monitoring-panel";
 import { NotificationSettingsPanel } from "./notification-settings-panel";
 import { OperationsPanel } from "./operations-panel";
@@ -118,7 +118,7 @@ export default async function DashboardPage() {
             isAdmin={me?.active_organization_role === "admin"}
             currentUserId={me?.id ?? null}
           />
-          <FindingsPanel enabled={Boolean(activeOrg)} />
+          <FindingsSection enabled={Boolean(activeOrg)} />
           <ReportsPanel enabled={Boolean(activeOrg)} />
           <AuditPanel enabled={Boolean(activeOrg)} />
         </>
