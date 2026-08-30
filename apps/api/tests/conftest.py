@@ -88,9 +88,17 @@ def session_factory(engine):
     return sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
 
+def _drop_test_schema(engine) -> None:
+    """Drop ORM tables and Alembic state as one intentional test reset."""
+    Base.metadata.drop_all(bind=engine)
+    with engine.begin() as connection:
+        connection.execute(text("DROP TABLE IF EXISTS alembic_version"))
+        assert connection.scalar(text("SELECT to_regclass('alembic_version')")) is None
+
+
 @pytest.fixture
 def db_session(engine) -> Generator[Session, None, None]:
-    Base.metadata.drop_all(bind=engine)
+    _drop_test_schema(engine)
     Base.metadata.create_all(bind=engine)
     SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     session = SessionLocal()
@@ -98,7 +106,7 @@ def db_session(engine) -> Generator[Session, None, None]:
         yield session
     finally:
         session.close()
-        Base.metadata.drop_all(bind=engine)
+        _drop_test_schema(engine)
 
 
 @pytest.fixture
