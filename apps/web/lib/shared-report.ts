@@ -10,6 +10,11 @@ export type SharedReportFinding = {
   resolved_at?: string | null;
   business_impact?: string;
   remediation_guidance?: string;
+  remediation_record?: {
+    recorded?: boolean;
+    revision_count?: number;
+    latest_recorded_at?: string | null;
+  };
   retest_attempts?: number;
   affected_asset?: { hostname?: string | null; url?: string | null };
   validation?: {

@@ -534,6 +534,10 @@ export type FindingInboxRow = {
     state: FindingWorkflowState;
     resolved_at: string | null;
   };
+  remediation: {
+    revision_count: number;
+    latest_recorded_at: string | null;
+  };
   retests: {
     current_state: CurrentRetestState;
     attempt_count: number;
@@ -590,6 +594,24 @@ export type FindingResponse = {
   created_at: string;
   updated_at: string;
   resolved_at: string | null;
+};
+
+export type FindingRemediationRevision = {
+  id: string;
+  revision_number: number;
+  summary: string;
+  created_at: string;
+  created_by_user_id: string;
+  created_by_name: string | null;
+};
+
+export type FindingRemediationHistory = {
+  finding_id: string;
+  revision_count: number;
+  latest: FindingRemediationRevision | null;
+  page_size: number;
+  next_cursor: string | null;
+  revisions: FindingRemediationRevision[];
 };
 
 export type AuditEventResponse = {
@@ -1310,6 +1332,33 @@ export function fetchFinding(
   findingId: string,
 ): Promise<FindingResponse> {
   return apiFetch<FindingResponse>(`/v1/findings/${findingId}`, token);
+}
+
+export function fetchFindingRemediation(
+  token: string,
+  findingId: string,
+  options: { page_size?: number; cursor?: string | null } = {},
+): Promise<FindingRemediationHistory> {
+  const params = new URLSearchParams();
+  if (options.page_size != null) params.set("page_size", String(options.page_size));
+  if (options.cursor) params.set("cursor", options.cursor);
+  const query = params.toString();
+  return apiFetch<FindingRemediationHistory>(
+    `/v1/findings/${findingId}/remediation${query ? `?${query}` : ""}`,
+    token,
+  );
+}
+
+export function recordFindingRemediation(
+  token: string,
+  findingId: string,
+  summary: string,
+): Promise<FindingRemediationRevision> {
+  return apiFetch<FindingRemediationRevision>(
+    `/v1/findings/${findingId}/remediation`,
+    token,
+    { method: "POST", body: JSON.stringify({ summary }) },
+  );
 }
 
 export function startFindingRemediation(

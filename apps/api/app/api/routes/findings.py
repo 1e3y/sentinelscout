@@ -9,6 +9,11 @@ from app.api.deps import AuthContext, get_auth_context, get_db, require_active_o
 from app.models.asset import Asset
 from app.schemas.audit import FindingProvenanceResponse
 from app.schemas.finding import FindingResponse
+from app.schemas.finding_remediation import (
+    CreateFindingRemediationRevisionRequest,
+    FindingRemediationHistoryResponse,
+    FindingRemediationRevisionResponse,
+)
 from app.schemas.findings_inbox import (
     CurrentRetestState,
     FindingInboxResponse,
@@ -20,8 +25,14 @@ from app.services.authorization import assert_actor_org
 from app.services.findings import (
     get_finding_or_404,
     list_findings_for_user,
+    list_remediation_revisions,
     mark_ready_for_retest,
+    record_remediation_revision,
     start_remediation,
+)
+from app.services.findings.remediation_record import (
+    DEFAULT_REMEDIATION_PAGE_SIZE,
+    MAX_REMEDIATION_PAGE_SIZE,
 )
 from app.services.findings_inbox import (
     DEFAULT_PAGE_SIZE,
@@ -29,7 +40,11 @@ from app.services.findings_inbox import (
     list_findings_inbox,
 )
 from app.services.provenance import build_finding_provenance
-from app.services.rate_limit import ACTION_RETEST, enforce_rate_limit
+from app.services.rate_limit import (
+    ACTION_REMEDIATION_RECORD,
+    ACTION_RETEST,
+    enforce_rate_limit,
+)
 from app.services.retest_runtime import list_finding_retests, queue_finding_retest
 from app.services.targets import require_active_organization
 
@@ -124,6 +139,64 @@ def get_finding_endpoint(
     finding = get_finding_or_404(db, finding_id=finding_id, user_id=auth.user.id)
     asset = db.get(Asset, finding.asset_id)
     return _to_finding_response(db, finding, asset)
+
+
+@router.get(
+    "/{finding_id}/remediation",
+    response_model=FindingRemediationHistoryResponse,
+)
+def list_finding_remediation_endpoint(
+    finding_id: UUID,
+    auth: Annotated[AuthContext, Depends(get_auth_context)],
+    db: Annotated[Session, Depends(get_db)],
+    page_size: Annotated[
+        int, Query(ge=1, le=MAX_REMEDIATION_PAGE_SIZE)
+    ] = DEFAULT_REMEDIATION_PAGE_SIZE,
+    cursor: str | None = None,
+) -> FindingRemediationHistoryResponse:
+    return list_remediation_revisions(
+        db,
+        finding_id=finding_id,
+        user_id=auth.user.id,
+        page_size=page_size,
+        cursor=cursor,
+    )
+
+
+@router.post(
+    "/{finding_id}/remediation",
+    response_model=FindingRemediationRevisionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def record_finding_remediation_endpoint(
+    finding_id: UUID,
+    body: CreateFindingRemediationRevisionRequest,
+    auth: Annotated[AuthContext, Depends(get_auth_context)],
+    db: Annotated[Session, Depends(get_db)],
+) -> FindingRemediationRevisionResponse:
+    actor = require_active_org_actor(auth)
+    finding = get_finding_or_404(db, finding_id=finding_id, user_id=actor.user_id)
+    assert_actor_org(actor, finding.organization_id, not_found="Finding not found")
+    enforce_rate_limit(
+        db,
+        organization_id=finding.organization_id,
+        user_id=actor.user_id,
+        action=ACTION_REMEDIATION_RECORD,
+    )
+    created = record_remediation_revision(
+        db,
+        finding=finding,
+        summary=body.summary,
+        actor=actor,
+    )
+    return FindingRemediationRevisionResponse(
+        id=created.revision.id,
+        revision_number=created.revision.revision_number,
+        summary=created.revision.summary,
+        created_at=created.revision.created_at,
+        created_by_user_id=created.revision.created_by_user_id,
+        created_by_name=created.created_by_name,
+    )
 
 
 @router.post("/{finding_id}/start-remediation", response_model=FindingResponse)

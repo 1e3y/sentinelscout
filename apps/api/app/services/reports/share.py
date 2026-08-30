@@ -173,6 +173,16 @@ def build_share_public_report(report: AssessmentReport, snapshot: dict[str, Any]
                 "validation": _pick(
                     _as_dict(item.get("validation")), ("method", "status", "summary")
                 ),
+                **(
+                    {
+                        "remediation_record": _pick(
+                            _as_dict(item.get("remediation_record")),
+                            ("recorded", "revision_count", "latest_recorded_at"),
+                        )
+                    }
+                    if isinstance(item.get("remediation_record"), dict)
+                    else {}
+                ),
                 "latest_retest": public_latest,
                 "evidence": _strip_blocked(_as_dict(item.get("evidence"))),
             }

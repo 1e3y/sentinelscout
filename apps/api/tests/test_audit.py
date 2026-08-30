@@ -287,6 +287,14 @@ def test_validation_finding_retest_audits_and_provenance(
     )
     assert (
         client.post(
+            f"/v1/findings/{finding_id}/remediation",
+            headers=_auth(token),
+            json={"summary": "Updated the application configuration."},
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post(
             f"/v1/findings/{finding_id}/ready-for-retest", headers=_auth(token)
         ).status_code
         == 200

@@ -26,7 +26,7 @@ from app.models.report import REPORT_SCHEMA_VERSION, AssessmentReport
 from app.services.reports.snapshot import canonical_json, content_digest
 from app.services.reports.summary import HEADLINE_LABELS
 
-PDF_RENDERER_VERSION = 2
+PDF_RENDERER_VERSION = 3
 SUPPORTED_REPORT_SCHEMA_VERSION = REPORT_SCHEMA_VERSION
 MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024
 MAX_FINDINGS = 200
@@ -743,6 +743,36 @@ def _build_story(
         story.append(_p(rl, finding.get("business_impact") or "", styles["body"]))
         story.append(_p(rl, "Remediation", styles["h2"]))
         story.append(_p(rl, finding.get("remediation_guidance") or "", styles["body"]))
+        remediation_record = _as_dict(finding.get("remediation_record"))
+        if remediation_record.get("recorded"):
+            revision_count = int(remediation_record.get("revision_count") or 0)
+            revision_label = "record" if revision_count == 1 else "records"
+            story.append(_p(rl, "Customer-recorded remediation", styles["h2"]))
+            story.append(
+                _p(
+                    rl,
+                    f"{revision_count} {revision_label}; "
+                    f"latest recorded "
+                    f"{remediation_record.get('latest_recorded_at') or '—'}.",
+                    styles["body"],
+                )
+            )
+            story.append(
+                _p(
+                    rl,
+                    "This records customer-described work and is not verification. "
+                    "Only a passing retest confirms the condition is no longer present.",
+                    styles["small"],
+                )
+            )
+        else:
+            story.append(
+                _p(
+                    rl,
+                    "No customer-recorded remediation existed when this report was generated.",
+                    styles["small"],
+                )
+            )
         latest = finding.get("latest_retest")
         if isinstance(latest, dict):
             story.append(_p(rl, "Latest retest at report generation", styles["h2"]))

@@ -22,6 +22,8 @@ _AUDIT_METADATA_ALLOWLIST = frozenset(
         "operation_id",
         "candidate_id",
         "finding_id",
+        "remediation_revision_id",
+        "revision_number",
         "asset_id",
         "retest_id",
         "validation_attempt_id",

@@ -11,6 +11,7 @@ from app.models.candidate import SecurityCandidate
 from app.models.coverage import OperationCoverageSummary
 from app.models.diff import OperationDiffSummary
 from app.models.finding import Finding
+from app.models.finding_remediation import FindingRemediationRevision
 from app.models.monitoring import (
     MonitoringConfiguration,
     MonitoringReportDeliveryRecipient,
@@ -51,6 +52,7 @@ __all__ = [
     "AuthorizedTarget",
     "DiscoveryObservation",
     "Finding",
+    "FindingRemediationRevision",
     "MonitoringConfiguration",
     "MonitoringReportDeliveryRecipient",
     "NotificationOutbox",

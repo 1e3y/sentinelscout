@@ -4,10 +4,13 @@ import { useAuth } from "@clerk/nextjs";
 import { useCallback, useEffect, useState, useTransition } from "react";
 import {
   fetchFinding,
+  fetchFindingRemediation,
   fetchFindingRetests,
   markFindingReadyForRetest,
   queueFindingRetest,
+  recordFindingRemediation,
   startFindingRemediation,
+  type FindingRemediationHistory,
   type FindingResponse,
   type RetestAttemptResponse,
 } from "@/lib/api";
@@ -62,6 +65,9 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
   const { getToken } = useAuth();
   const [selected, setSelected] = useState<FindingResponse | null>(null);
   const [retests, setRetests] = useState<RetestAttemptResponse[]>([]);
+  const [remediation, setRemediation] =
+    useState<FindingRemediationHistory | null>(null);
+  const [remediationSummary, setRemediationSummary] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -77,6 +83,8 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
       if (!findingId) {
         setSelected(null);
         setRetests([]);
+        setRemediation(null);
+        setRemediationSummary("");
         return;
       }
       try {
@@ -85,12 +93,15 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
           setError("Missing session token");
           return;
         }
-        const [finding, attempts] = await Promise.all([
+        const [finding, attempts, history] = await Promise.all([
           fetchFinding(token, findingId),
           fetchFindingRetests(token, findingId),
+          fetchFindingRemediation(token, findingId),
         ]);
         setSelected(finding);
         setRetests(attempts);
+        setRemediation(history);
+        setRemediationSummary("");
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load finding");
       }
@@ -118,18 +129,86 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
         }
         await action(token, selected.id);
         setMessage(successMessage);
-        const [finding, attempts] = await Promise.all([
+        const [finding, attempts, history] = await Promise.all([
           fetchFinding(token, selected.id),
           fetchFindingRetests(token, selected.id),
+          fetchFindingRemediation(token, selected.id),
         ]);
         setSelected(finding);
         setRetests(attempts);
+        setRemediation(history);
         onFindingChanged();
       } catch (err) {
         setError(err instanceof Error ? err.message : failureMessage);
       }
     });
   }
+
+  function saveRemediationRevision() {
+    if (!selected) return;
+    startTransition(async () => {
+      setError(null);
+      setMessage(null);
+      try {
+        const token = await getToken();
+        if (!token) {
+          setError("Missing session token");
+          return;
+        }
+        await recordFindingRemediation(token, selected.id, remediationSummary);
+        const history = await fetchFindingRemediation(token, selected.id);
+        setRemediation(history);
+        setRemediationSummary("");
+        setMessage("Remediation recorded.");
+        onFindingChanged();
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Failed to record remediation",
+        );
+      }
+    });
+  }
+
+  function loadMoreRemediation() {
+    if (!selected || !remediation?.next_cursor) return;
+    startTransition(async () => {
+      setError(null);
+      try {
+        const token = await getToken();
+        if (!token) {
+          setError("Missing session token");
+          return;
+        }
+        const next = await fetchFindingRemediation(token, selected.id, {
+          cursor: remediation.next_cursor,
+        });
+        setRemediation((current) =>
+          current
+            ? {
+                ...next,
+                latest: current.latest,
+                revisions: [...current.revisions, ...next.revisions],
+              }
+            : next,
+        );
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Failed to load remediation history",
+        );
+      }
+    });
+  }
+
+  const remediationCharacterCount = Array.from(remediationSummary).length;
+  const remediationCanSave =
+    remediationSummary.trim().length > 0 &&
+    remediationCharacterCount <= 4000 &&
+    selected?.status !== "resolved";
+  const readyForRetestBlocked =
+    selected?.status === "in_progress" &&
+    (remediation?.revision_count ?? 0) === 0;
 
   return (
     <section className="space-y-4" aria-labelledby="finding-detail-heading">
@@ -268,6 +347,112 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
             </div>
           ) : null}
 
+          <div className="space-y-3 border-t border-zinc-100 pt-4">
+            <div>
+              <h4 className="text-sm font-medium text-zinc-800">
+                Remediation record
+              </h4>
+              <p className="text-xs text-zinc-600">
+                Customer-recorded remediation describes work performed; it is not
+                verification. Only a passing retest confirms the condition is no
+                longer present.
+              </p>
+            </div>
+
+            {remediation?.latest ? (
+              <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
+                <p className="whitespace-pre-wrap text-sm text-zinc-800">
+                  {remediation.latest.summary}
+                </p>
+                <p className="mt-2 text-xs text-zinc-500">
+                  Revision {remediation.latest.revision_number} · Recorded by{" "}
+                  {remediation.latest.created_by_name ?? "Organization member"} ·{" "}
+                  {formatTime(remediation.latest.created_at)}
+                </p>
+              </div>
+            ) : (
+              <p className="text-xs text-zinc-500">
+                No remediation has been recorded.
+              </p>
+            )}
+
+            {remediation && remediation.revisions.length > 0 ? (
+              <details>
+                <summary className="cursor-pointer text-xs font-medium text-zinc-700">
+                  Revision history ({remediation.revision_count})
+                </summary>
+                <ol className="mt-2 space-y-2">
+                  {remediation.revisions.map((revision) => (
+                    <li
+                      key={revision.id}
+                      className="rounded-md border border-zinc-200 p-3"
+                    >
+                      <p className="whitespace-pre-wrap text-sm text-zinc-800">
+                        {revision.summary}
+                      </p>
+                      <p className="mt-2 text-xs text-zinc-500">
+                        Revision {revision.revision_number} · Recorded by{" "}
+                        {revision.created_by_name ?? "Organization member"} ·{" "}
+                        {formatTime(revision.created_at)}
+                      </p>
+                    </li>
+                  ))}
+                </ol>
+                {remediation.next_cursor ? (
+                  <button
+                    type="button"
+                    disabled={pending}
+                    className="mt-2 rounded-md border border-zinc-300 px-3 py-1.5 text-xs disabled:opacity-50"
+                    onClick={loadMoreRemediation}
+                  >
+                    Load older revisions
+                  </button>
+                ) : null}
+              </details>
+            ) : null}
+
+            {selected.status !== "resolved" ? (
+              <div className="space-y-2">
+                <label className="block text-xs font-medium text-zinc-700">
+                  Record what changed
+                  <textarea
+                    value={remediationSummary}
+                    disabled={pending}
+                    rows={5}
+                    className="mt-1 block w-full rounded-md border border-zinc-300 p-2 text-sm disabled:opacity-50"
+                    onChange={(event) => setRemediationSummary(event.target.value)}
+                  />
+                </label>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <p className="text-zinc-500">
+                    Do not include passwords, API keys, tokens, or other secrets.
+                  </p>
+                  <p
+                    className={
+                      remediationCharacterCount > 4000
+                        ? "text-red-700"
+                        : "text-zinc-500"
+                    }
+                  >
+                    {remediationCharacterCount}/4000
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={pending || !remediationCanSave}
+                  className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs disabled:opacity-50"
+                  onClick={saveRemediationRevision}
+                >
+                  Record remediation
+                </button>
+              </div>
+            ) : (
+              <p className="text-xs text-zinc-500">
+                Resolved findings cannot receive new remediation revisions.
+              </p>
+            )}
+          </div>
+
           <div className="flex flex-wrap gap-2">
             {selected.status === "open" ? (
               <button
@@ -286,20 +471,27 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
               </button>
             ) : null}
             {selected.status === "in_progress" ? (
-              <button
-                type="button"
-                disabled={pending}
-                className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs disabled:opacity-50"
-                onClick={() =>
-                  runAction(
-                    markFindingReadyForRetest,
-                    "Marked ready for retest.",
-                    "Failed to mark ready for retest",
-                  )
-                }
-              >
-                Mark Ready for Retest
-              </button>
+              <div>
+                <button
+                  type="button"
+                  disabled={pending || readyForRetestBlocked}
+                  className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs disabled:opacity-50"
+                  onClick={() =>
+                    runAction(
+                      markFindingReadyForRetest,
+                      "Marked ready for retest.",
+                      "Failed to mark ready for retest",
+                    )
+                  }
+                >
+                  Mark Ready for Retest
+                </button>
+                {readyForRetestBlocked ? (
+                  <p className="mt-1 text-xs text-zinc-500">
+                    Record what you changed before requesting a retest.
+                  </p>
+                ) : null}
+              </div>
             ) : null}
             {selected.status === "ready_for_retest" ? (
               <button

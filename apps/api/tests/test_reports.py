@@ -665,6 +665,14 @@ def test_finding_state_change_creates_v2_and_leaves_v1_untouched(
     )
     assert (
         client.post(
+            f"/v1/findings/{finding_id}/remediation",
+            headers=_auth(token),
+            json={"summary": "Updated the application configuration."},
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post(
             f"/v1/findings/{finding_id}/ready-for-retest", headers=_auth(token)
         ).status_code
         == 200
@@ -681,6 +689,53 @@ def test_finding_state_change_creates_v2_and_leaves_v1_untouched(
     assert refetched_v1["snapshot"] == v1["snapshot"]
     assert refetched_v1["snapshot_digest"] == v1["snapshot_digest"]
     assert refetched_v1["snapshot"]["content"]["findings"][0]["status"] == "open"
+
+
+def test_remediation_metadata_changes_digest_without_freezing_body_or_author(
+    client, make_token, seed_user_a, dns_resolver, engine
+):
+    user_id, org_id = seed_user_a
+    token = make_token(sub=user_id, org_id=org_id, org_role="org:admin")
+    _, operation_id, finding_id = _operation_with_open_finding(
+        client, token, dns_resolver, engine, "rep-remediation.example"
+    )
+    v1 = _generate(client, token, operation_id).json()
+    v1_finding = v1["snapshot"]["content"]["findings"][0]
+    assert v1_finding["remediation_record"] == {
+        "recorded": False,
+        "revision_count": 0,
+        "latest_recorded_at": None,
+    }
+
+    body = "Updated configuration 😀 — authenticated detail only."
+    recorded = client.post(
+        f"/v1/findings/{finding_id}/remediation",
+        headers=_auth(token),
+        json={"summary": body},
+    )
+    assert recorded.status_code == 201, recorded.text
+
+    v2 = _generate(client, token, operation_id)
+    assert v2.status_code == 201, v2.text
+    v2_body = v2.json()
+    assert v2_body["report_version"] == 2
+    assert v2_body["snapshot_digest"] != v1["snapshot_digest"]
+    assert v2_body["snapshot"]["report_schema_version"] == 1
+    v2_finding = v2_body["snapshot"]["content"]["findings"][0]
+    assert v2_finding["status"] == "open"
+    assert v2_finding["remediation_record"]["recorded"] is True
+    assert v2_finding["remediation_record"]["revision_count"] == 1
+    assert v2_finding["remediation_record"]["latest_recorded_at"]
+    frozen = json.dumps(v2_body["snapshot"], ensure_ascii=False)
+    assert body not in frozen
+    assert "created_by_user_id" not in frozen
+
+    reused = _generate(client, token, operation_id)
+    assert reused.status_code == 200
+    assert reused.json()["id"] == v2_body["id"]
+    assert v1["snapshot"]["content"]["findings"][0]["remediation_record"][
+        "revision_count"
+    ] == 0
 
 
 def test_generation_is_deterministic_across_generation_timestamps(

@@ -5,6 +5,10 @@ from app.services.findings.remediation import (
     mark_ready_for_retest,
     start_remediation,
 )
+from app.services.findings.remediation_record import (
+    list_remediation_revisions,
+    record_remediation_revision,
+)
 
 __all__ = [
     "promote_candidate_to_finding",
@@ -12,4 +16,6 @@ __all__ = [
     "list_findings_for_user",
     "start_remediation",
     "mark_ready_for_retest",
+    "list_remediation_revisions",
+    "record_remediation_revision",
 ]

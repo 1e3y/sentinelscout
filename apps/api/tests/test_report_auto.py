@@ -4,12 +4,12 @@ import json
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from sqlalchemy import func, select
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.orm.attributes import flag_modified
-
+from app.models.asset import Asset
 from app.models.audit import AuditEvent
+from app.models.candidate import SecurityCandidate
 from app.models.coverage import OperationCoverageSummary
+from app.models.finding import Finding
+from app.models.finding_remediation import FindingRemediationRevision
 from app.models.monitoring import MonitoringConfiguration
 from app.models.operation import Operation
 from app.models.report import AssessmentReport
@@ -26,6 +26,9 @@ from app.services.reports.auto import (
 from app.services.reports.snapshot import content_digest
 from app.services.scheduler_runtime import process_one_scheduled_monitoring
 from app.services.worker_runtime import process_one_operation
+from sqlalchemy import func, select
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm.attributes import flag_modified
 from tests.test_reports import _auth, _create_verified_target, _generate
 
 
@@ -248,6 +251,75 @@ def test_scheduled_completed_with_auto_flag_enqueues_and_generates(
         f"/v1/targets/{target_id}/monitoring", headers=_auth(token)
     ).json()
     assert listed_target["auto_generate_reports"] is True
+
+
+def test_automatic_report_freezes_current_remediation_metadata_without_body(
+    client, make_token, seed_user_a, dns_resolver, engine, db_session
+):
+    clerk_user, clerk_org = seed_user_a
+    token = make_token(sub=clerk_user, org_id=clerk_org, org_role="org:admin")
+    me = client.get("/v1/me", headers=_auth(token)).json()
+    user_id = UUID(me["id"])
+    organization_id = UUID(me["active_organization_id"])
+    target_id, operation_id, factory = _complete_scheduled(
+        client, token, dns_resolver, engine, db_session, "auto-remediation.example"
+    )
+    operation = db_session.get(Operation, operation_id)
+    asset = db_session.scalar(
+        select(Asset).where(Asset.target_id == UUID(target_id)).limit(1)
+    )
+    assert operation is not None
+    assert asset is not None
+    candidate = SecurityCandidate(
+        organization_id=organization_id,
+        operation_id=operation.id,
+        asset_id=asset.id,
+        candidate_type="staging_dev_exposed",
+        title="Staging environment exposed",
+        summary="Deterministic rule matched.",
+        status="supported",
+        evidence={},
+    )
+    db_session.add(candidate)
+    db_session.flush()
+    finding = Finding(
+        organization_id=organization_id,
+        operation_id=operation.id,
+        candidate_id=candidate.id,
+        asset_id=asset.id,
+        title=candidate.title,
+        summary=candidate.summary,
+        severity="medium",
+        status="open",
+        business_impact="Catalog impact.",
+        remediation_guidance="Catalog guidance.",
+        evidence={"candidate_type": candidate.candidate_type},
+    )
+    db_session.add(finding)
+    db_session.flush()
+    remediation_body = "Worker must never freeze this body 😀"
+    db_session.add(
+        FindingRemediationRevision(
+            organization_id=organization_id,
+            finding_id=finding.id,
+            revision_number=1,
+            summary=remediation_body,
+            created_by_user_id=user_id,
+        )
+    )
+    db_session.commit()
+
+    processed = process_one_automatic_report(factory)
+    assert processed is not None
+    assert processed.status == "succeeded"
+    db_session.expire_all()
+    report = db_session.get(AssessmentReport, processed.report_id)
+    assert report is not None
+    frozen_finding = report.snapshot_json["content"]["findings"][0]
+    assert frozen_finding["remediation_record"]["recorded"] is True
+    assert frozen_finding["remediation_record"]["revision_count"] == 1
+    assert frozen_finding["remediation_record"]["latest_recorded_at"]
+    assert remediation_body not in json.dumps(report.snapshot_json, ensure_ascii=False)
 
 
 def test_no_job_when_auto_flag_false(

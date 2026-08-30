@@ -139,8 +139,8 @@ export function FindingsInboxPanel({
           </h2>
           <p className="text-sm text-zinc-600">
             Live state for every supported finding in your active organization.
-            These values are read from the current workflow and retest records,
-            not from a frozen assessment snapshot.
+            These values are read from the current workflow, remediation metadata,
+            and retest records, not from a frozen assessment snapshot.
           </p>
         </div>
         <button
@@ -312,6 +312,23 @@ export function FindingsInboxPanel({
                                 {row.retests.latest_terminal.status})
                               </span>
                             ) : null}
+                          </dd>
+                        </div>
+                        <div className="flex gap-1">
+                          <dt className="text-zinc-500">Remediation record:</dt>
+                          <dd>
+                            {row.remediation.revision_count === 0
+                              ? "None recorded"
+                              : `${row.remediation.revision_count} ${
+                                  row.remediation.revision_count === 1
+                                    ? "revision"
+                                    : "revisions"
+                                }`}
+                            {row.remediation.latest_recorded_at
+                              ? ` · latest ${formatTime(
+                                  row.remediation.latest_recorded_at,
+                                )}`
+                              : ""}
                           </dd>
                         </div>
                         <div className="flex gap-1">

@@ -15,13 +15,14 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.capabilities.manifest import UNSUPPORTED_CLASSES
 from app.models.coverage import OperationCoverageSummary
 from app.models.diff import OperationDiffSummary
 from app.models.finding import Finding
+from app.models.finding_remediation import FindingRemediationRevision
 from app.models.operation import Operation
 from app.models.operation_controls import OperationControlSnapshot
 from app.models.organization import Organization
@@ -179,7 +180,33 @@ def _retests_by_finding(
     return grouped
 
 
-def _finding_entry(finding: Finding, retests: list[RetestAttempt]) -> dict[str, Any]:
+def _remediation_by_finding(
+    db: Session, finding_ids: list[UUID]
+) -> dict[UUID, tuple[int, datetime | None]]:
+    if not finding_ids:
+        return {}
+    rows = db.execute(
+        select(
+            FindingRemediationRevision.finding_id,
+            func.count().label("revision_count"),
+            func.max(FindingRemediationRevision.created_at).label(
+                "latest_recorded_at"
+            ),
+        )
+        .where(FindingRemediationRevision.finding_id.in_(finding_ids))
+        .group_by(FindingRemediationRevision.finding_id)
+    ).all()
+    return {
+        row.finding_id: (int(row.revision_count or 0), row.latest_recorded_at)
+        for row in rows
+    }
+
+
+def _finding_entry(
+    finding: Finding,
+    retests: list[RetestAttempt],
+    remediation: tuple[int, datetime | None],
+) -> dict[str, Any]:
     evidence = finding.evidence if isinstance(finding.evidence, dict) else {}
     validation = evidence.get("validation") if isinstance(evidence, dict) else None
     validation = validation if isinstance(validation, dict) else {}
@@ -187,6 +214,7 @@ def _finding_entry(finding: Finding, retests: list[RetestAttempt]) -> dict[str, 
 
     terminal = [row for row in retests if row.status not in {"pending", "running"}]
     latest = terminal[-1] if terminal else None
+    revision_count, latest_recorded_at = remediation
 
     entry: dict[str, Any] = {
         "finding_id": str(finding.id),
@@ -202,6 +230,11 @@ def _finding_entry(finding: Finding, retests: list[RetestAttempt]) -> dict[str, 
         "resolved_at": _iso(finding.resolved_at),
         "business_impact": finding.business_impact,
         "remediation_guidance": finding.remediation_guidance,
+        "remediation_record": {
+            "recorded": revision_count > 0,
+            "revision_count": revision_count,
+            "latest_recorded_at": _iso(latest_recorded_at),
+        },
         "affected_asset": {
             "hostname": getattr(asset, "hostname", None),
             "url": getattr(asset, "url", None),
@@ -234,8 +267,17 @@ def _findings_content(db: Session, operation: Operation) -> list[dict[str, Any]]
             .where(Finding.operation_id == operation.id)
         ).all()
     )
-    grouped = _retests_by_finding(db, [row.id for row in findings])
-    entries = [_finding_entry(row, grouped.get(row.id, [])) for row in findings]
+    finding_ids = [row.id for row in findings]
+    grouped = _retests_by_finding(db, finding_ids)
+    remediation = _remediation_by_finding(db, finding_ids)
+    entries = [
+        _finding_entry(
+            row,
+            grouped.get(row.id, []),
+            remediation.get(row.id, (0, None)),
+        )
+        for row in findings
+    ]
     entries.sort(
         key=lambda item: (
             -int(item["severity_rank"]),

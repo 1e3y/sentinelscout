@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.finding import ALLOWED_REMEDIATION_TRANSITIONS, Finding
+from app.models.finding_remediation import FindingRemediationRevision
 from app.models.operation import Operation
 from app.models.organization import OrganizationMembership
 from app.services.audit import record_audit
@@ -142,6 +143,20 @@ def start_remediation(db: Session, *, finding_id: UUID, actor: AuthorizedOrgActo
 def mark_ready_for_retest(db: Session, *, finding_id: UUID, actor: AuthorizedOrgActor) -> Finding:
     finding = get_finding_or_404(db, finding_id=finding_id, user_id=actor.user_id)
     assert_actor_org(actor, finding.organization_id, not_found="Finding not found")
+    if finding.status == "in_progress":
+        has_remediation_revision = db.scalar(
+            select(FindingRemediationRevision.id)
+            .where(
+                FindingRemediationRevision.finding_id == finding.id,
+                FindingRemediationRevision.organization_id == finding.organization_id,
+            )
+            .limit(1)
+        )
+        if has_remediation_revision is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Record what you changed before requesting a retest.",
+            )
     return _transition(
         db,
         finding=finding,

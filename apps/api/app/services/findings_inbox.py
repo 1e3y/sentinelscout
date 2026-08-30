@@ -1,9 +1,10 @@
 """Read-only organization findings inbox.
 
 Current operational state only. This module reads ``findings``, ``assets``,
-``authorized_targets``, ``security_candidates`` and ``retest_attempts``, and
-nothing else. It never touches coverage freezes, diff summaries, report
-snapshots, shares, deliveries, or audit rows, and it performs no writes.
+``authorized_targets``, ``security_candidates``, ``retest_attempts`` and compact
+metadata from ``finding_remediation_revisions``. It never reads remediation
+text, touches coverage freezes, diff summaries, report snapshots, shares,
+deliveries, or audit rows, and it performs no writes.
 
 Finding rows already mean promoted/supported findings: the sole insert path is
 ``promote_candidate_to_finding``, which requires a ``supported`` candidate backed
@@ -29,12 +30,14 @@ from sqlalchemy.orm import Session
 from app.models.asset import Asset
 from app.models.candidate import SecurityCandidate
 from app.models.finding import Finding
+from app.models.finding_remediation import FindingRemediationRevision
 from app.models.organization import Organization
 from app.models.retest import ACTIVE_RETEST_STATUSES, RetestAttempt
 from app.models.target import AuthorizedTarget
 from app.schemas.findings_inbox import (
     FindingInboxAttentionReason,
     FindingInboxLatestTerminalRetest,
+    FindingInboxRemediation,
     FindingInboxResponse,
     FindingInboxRetests,
     FindingInboxRow,
@@ -305,6 +308,29 @@ def _retest_rollup_by_finding(
     }
 
 
+def _remediation_rollup_by_finding(
+    db: Session, *, finding_ids: list[UUID]
+) -> dict[UUID, tuple[int, datetime | None]]:
+    rows = db.execute(
+        select(
+            FindingRemediationRevision.finding_id,
+            func.count().label("revision_count"),
+            func.max(FindingRemediationRevision.created_at).label(
+                "latest_recorded_at"
+            ),
+        )
+        .where(FindingRemediationRevision.finding_id.in_(finding_ids))
+        .group_by(FindingRemediationRevision.finding_id)
+    ).all()
+    return {
+        row.finding_id: (
+            int(row.revision_count or 0),
+            row.latest_recorded_at,
+        )
+        for row in rows
+    }
+
+
 def _current_retest_state(
     *, has_active: bool, latest_terminal: FindingInboxLatestTerminalRetest | None
 ) -> str:
@@ -410,6 +436,9 @@ def list_findings_inbox(
     finding_ids = [row.finding_id for row in page]
     latest_terminal = _latest_terminal_by_finding(db, finding_ids=finding_ids)
     rollup = _retest_rollup_by_finding(db, finding_ids=finding_ids)
+    remediation_rollup = _remediation_rollup_by_finding(
+        db, finding_ids=finding_ids
+    )
 
     items: list[FindingInboxRow] = []
     for row in page:
@@ -417,6 +446,9 @@ def list_findings_inbox(
         terminal = latest_terminal.get(row.finding_id)
         current_state = _current_retest_state(
             has_active=has_active, latest_terminal=terminal
+        )
+        revision_count, latest_recorded_at = remediation_rollup.get(
+            row.finding_id, (0, None)
         )
         items.append(
             FindingInboxRow(
@@ -434,6 +466,10 @@ def list_findings_inbox(
                 workflow=FindingInboxWorkflow(
                     state=WORKFLOW_STATE_BY_FINDING_STATUS[row.finding_status],
                     resolved_at=row.resolved_at,
+                ),
+                remediation=FindingInboxRemediation(
+                    revision_count=revision_count,
+                    latest_recorded_at=latest_recorded_at,
                 ),
                 retests=FindingInboxRetests(
                     current_state=current_state,

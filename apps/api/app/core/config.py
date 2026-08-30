@@ -71,6 +71,9 @@ class Settings(BaseSettings):
     rate_limit_operation_create: int = Field(default=30, alias="RATE_LIMIT_OPERATION_CREATE")
     rate_limit_validation: int = Field(default=60, alias="RATE_LIMIT_VALIDATION")
     rate_limit_retest: int = Field(default=30, alias="RATE_LIMIT_RETEST")
+    rate_limit_finding_remediation: int = Field(
+        default=30, alias="RATE_LIMIT_FINDING_REMEDIATION"
+    )
     rate_limit_notification_settings: int = Field(
         default=30, alias="RATE_LIMIT_NOTIFICATION_SETTINGS"
     )

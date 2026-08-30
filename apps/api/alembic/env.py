@@ -21,6 +21,7 @@ from app.models import (  # noqa: F401
     AuthorizedTarget,
     DiscoveryObservation,
     Finding,
+    FindingRemediationRevision,
     MonitoringConfiguration,
     MonitoringReportDeliveryRecipient,
     NotificationOutbox,

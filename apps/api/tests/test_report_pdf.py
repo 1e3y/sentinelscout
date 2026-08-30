@@ -18,7 +18,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.config import reset_settings_cache
 from app.models.audit import AuditEvent
-from app.models.report import AssessmentReport
+from app.models.report import REPORT_SCHEMA_VERSION, AssessmentReport
 from app.services.rate_limit import ACTION_REPORT_PDF_EXPORT
 from app.services.reports.pdf import (
     FONT_FILE,
@@ -218,7 +218,7 @@ def test_member_can_export_pdf_without_active_org_switch(
     assert "pdf-member.example" in text
     assert f"v{report['report_version']}" in text
     assert report["snapshot"]["envelope"]["generated_at"] in text
-    assert "Scout PDF renderer 2" in text
+    assert "Scout PDF renderer 3" in text
     assert "Assessment Incomplete" not in text
 
 
@@ -722,6 +722,14 @@ def test_v1_pdf_stays_frozen_after_v2(
     )
     assert (
         client.post(
+            f"/v1/findings/{finding_id}/remediation",
+            headers=_auth(token),
+            json={"summary": "Updated the application configuration."},
+        ).status_code
+        == 201
+    )
+    assert (
+        client.post(
             f"/v1/findings/{finding_id}/ready-for-retest", headers=_auth(token)
         ).status_code
         == 200
@@ -893,8 +901,50 @@ def test_pdf_write_verbs_are_not_exposed(
         assert response.status_code == 405, (method, response.status_code)
 
 
+def test_renderer_three_supports_old_and_metadata_only_remediation_snapshots(
+    client, make_token, seed_user_a, dns_resolver, engine, db_session
+):
+    user_id, org_id = seed_user_a
+    token = make_token(sub=user_id, org_id=org_id, org_role="org:admin")
+
+    _, operation_id, finding_id = _operation_with_open_finding(
+        client, token, dns_resolver, engine, "pdf-remediation.example"
+    )
+    remediation_body = "設定を更新しました 👩‍💻"
+    recorded = client.post(
+        f"/v1/findings/{finding_id}/remediation",
+        headers=_auth(token),
+        json={"summary": remediation_body},
+    )
+    assert recorded.status_code == 201, recorded.text
+    report = _generate(client, token, operation_id).json()
+    assert report["snapshot"]["report_schema_version"] == 1
+    new_pdf = _pdf(client, token, report["id"])
+    assert new_pdf.status_code == 200, new_pdf.text
+    new_text = _pdf_text(new_pdf.content)
+    assert "Customer-recorded remediation" in new_text
+    assert "1 record; latest recorded" in new_text
+    assert "not verification" in new_text
+    assert remediation_body not in new_text
+    assert remediation_body.encode("utf-8") not in new_pdf.content
+
+    def remove_m31_metadata(snapshot):
+        for finding in snapshot["content"]["findings"]:
+            finding.pop("remediation_record", None)
+
+    _mutate_content(
+        db_session,
+        report["id"],
+        remove_m31_metadata,
+        update_digest=True,
+    )
+    old_pdf = _pdf(client, token, report["id"])
+    assert old_pdf.status_code == 200, old_pdf.text
+
+
 def test_renderer_version_and_action_constants():
-    assert PDF_RENDERER_VERSION == 2
+    assert REPORT_SCHEMA_VERSION == 1
+    assert PDF_RENDERER_VERSION == 3
     assert ACTION_REPORT_PDF_EXPORT == "report.pdf_export"
 
 

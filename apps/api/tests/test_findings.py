@@ -233,6 +233,14 @@ def test_remediation_lifecycle_and_resolved_blocked(
         == 400
     )
 
+    assert (
+        client.post(
+            f"/v1/findings/{finding_id}/remediation",
+            headers=_auth(token),
+            json={"summary": "Updated the application configuration."},
+        ).status_code
+        == 201
+    )
     ready = client.post(
         f"/v1/findings/{finding_id}/ready-for-retest", headers=_auth(token)
     )

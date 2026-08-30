@@ -6,8 +6,8 @@ or any other frozen assessment artifact.
 
 Two naming rules are load bearing:
 
-* ``workflow`` is a projection of ``findings.status``. The schema has no
-  remediation record, so the inbox never claims one exists.
+* ``workflow`` is a projection of ``findings.status``. Operator-authored
+  remediation is a separate compact metadata block and never changes workflow.
 * ``promoted_at`` is ``findings.created_at``, the moment a supported candidate
   became a Finding. It is not a first-detection timestamp and must never be
   renamed to imply one.
@@ -65,12 +65,21 @@ class FindingInboxTarget(BaseModel):
 
 
 class FindingInboxWorkflow(BaseModel):
-    """Projection of findings.status. No remediation record exists to report."""
+    """Projection of findings.status, separate from remediation records."""
 
     model_config = ConfigDict(extra="forbid")
 
     state: FindingWorkflowState
     resolved_at: datetime | None = None
+
+
+class FindingInboxRemediation(BaseModel):
+    """Compact current metadata. Free-text remediation never enters the inbox."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    revision_count: int
+    latest_recorded_at: datetime | None = None
 
 
 class FindingInboxLatestTerminalRetest(BaseModel):
@@ -112,6 +121,7 @@ class FindingInboxRow(BaseModel):
     severity: FindingInboxSeverity
     status: FindingInboxStatus
     workflow: FindingInboxWorkflow
+    remediation: FindingInboxRemediation
     retests: FindingInboxRetests
     promoted_at: datetime
     last_updated_at: datetime

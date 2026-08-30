@@ -54,6 +54,7 @@ from app.services.coverage import (
 from app.services.diff import diff_snapshots, freeze_operation_diff
 from app.services.findings import mark_ready_for_retest, promote_candidate_to_finding
 from app.services.findings.remediation import start_remediation
+from app.services.findings.remediation_record import record_remediation_revision
 from app.services.operations import append_event, create_operation, queue_candidate_validation
 from app.services.targets import update_scope
 from app.services.retest_runtime import execute_retest_job, queue_finding_retest
@@ -218,6 +219,12 @@ def _run_retests(
             continue
         finding = promote_candidate_to_finding(db, candidate_id=candidate.id, actor=actor)
         start_remediation(db, finding_id=finding.id, actor=actor)
+        record_remediation_revision(
+            db,
+            finding=finding,
+            summary="Benchmark fixture remediation recorded.",
+            actor=actor,
+        )
         mark_ready_for_retest(db, finding_id=finding.id, actor=actor)
         if spec.after == "staging_down":
             http_client.mark_down(spec.hostname)

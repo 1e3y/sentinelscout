@@ -28,6 +28,7 @@ from tests.test_reports import (
     _auth,
     _clean_completed_operation,
     _generate,
+    _operation_with_open_finding,
 )
 
 
@@ -258,6 +259,56 @@ def test_external_resolve_strips_internal_snapshot_fields(
     assert "finding_id" not in payload["findings"][0]
 
 
+def test_share_exposes_optional_remediation_metadata_never_body_or_author(
+    client, make_token, seed_user_a, dns_resolver, engine, db_session
+):
+    user_id, org_id = seed_user_a
+    token = make_token(sub=user_id, org_id=org_id, org_role="org:admin")
+    _, operation_id, finding_id = _operation_with_open_finding(
+        client, token, dns_resolver, engine, "share-remediation.example"
+    )
+    remediation_body = "Authenticated only 設定を更新しました 👩‍💻"
+    recorded = client.post(
+        f"/v1/findings/{finding_id}/remediation",
+        headers=_auth(token),
+        json={"summary": remediation_body},
+    )
+    assert recorded.status_code == 201, recorded.text
+    report = _generate(client, token, operation_id).json()
+    created = _create_share(client, token, report["id"]).json()
+    resolved = client.post(
+        f"/v1/shared-reports/{created['id']}/resolve",
+        json={"secret": _secret_from_url(created["share_url"])},
+    )
+    assert resolved.status_code == 200, resolved.text
+    payload = resolved.json()
+    remediation = payload["findings"][0]["remediation_record"]
+    assert remediation["recorded"] is True
+    assert remediation["revision_count"] == 1
+    assert remediation["latest_recorded_at"]
+    dumped = json.dumps(payload, ensure_ascii=False)
+    assert remediation_body not in dumped
+    assert "created_by_user_id" not in dumped
+
+    row = db_session.get(AssessmentReport, report["id"])
+    snapshot = json.loads(json.dumps(row.snapshot_json))
+    snapshot["content"]["findings"][0].pop("remediation_record")
+    digest = content_digest(snapshot["content"])
+    snapshot["envelope"]["snapshot_digest"] = digest
+    row.snapshot_digest = digest
+    row.snapshot_json = snapshot
+    flag_modified(row, "snapshot_json")
+    db_session.commit()
+
+    old_created = _create_share(client, token, report["id"]).json()
+    old_resolved = client.post(
+        f"/v1/shared-reports/{old_created['id']}/resolve",
+        json={"secret": _secret_from_url(old_created["share_url"])},
+    )
+    assert old_resolved.status_code == 200, old_resolved.text
+    assert "remediation_record" not in old_resolved.json()["findings"][0]
+
+
 def test_malformed_secret_does_not_echo_sentinel(client, caplog):
     sentinel = "ECHO-SECRET-SENTINEL-M25-DO-NOT-RETURN"
     oversized = sentinel + ("A" * 400)
@@ -480,7 +531,7 @@ def test_shared_pdf_reuses_renderer_and_no_store(
     assert shared.headers.get("cache-control") == "private, no-store"
     assert shared.content.startswith(b"%PDF-")
     assert "share-pdf.example" in _pdf_text(shared.content)
-    assert "Scout PDF renderer 2" in _pdf_text(shared.content)
+    assert "Scout PDF renderer 3" in _pdf_text(shared.content)
     assert _pdf_text(shared.content) == _pdf_text(authed.content)
 
 

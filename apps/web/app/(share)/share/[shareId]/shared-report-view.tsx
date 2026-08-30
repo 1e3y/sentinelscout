@@ -142,6 +142,27 @@ function FindingCard({ finding }: { finding: SharedReportFinding }) {
         <p className="text-xs uppercase tracking-wide text-zinc-500">Remediation</p>
         <p className="text-sm text-zinc-800">{finding.remediation_guidance}</p>
       </div>
+      {finding.remediation_record?.recorded ? (
+        <div className="space-y-1 rounded border border-zinc-200 bg-zinc-50 p-3">
+          <p className="text-xs uppercase tracking-wide text-zinc-500">
+            Customer-recorded remediation
+          </p>
+          <p className="text-sm text-zinc-800">
+            {finding.remediation_record.revision_count ?? 0}{" "}
+            {finding.remediation_record.revision_count === 1 ? "record" : "records"}{" "}
+            · latest{" "}
+            {formatTime(finding.remediation_record.latest_recorded_at)}
+          </p>
+          <p className="text-xs text-zinc-600">
+            This records customer-described work and is not verification. Only a
+            passing retest confirms the condition is no longer present.
+          </p>
+        </div>
+      ) : (
+        <p className="text-xs text-zinc-500">
+          No customer-recorded remediation existed when this report was generated.
+        </p>
+      )}
       {finding.latest_retest ? (
         <div className="space-y-1 rounded border border-zinc-200 bg-zinc-50 p-3">
           <p className="text-xs uppercase tracking-wide text-zinc-500">

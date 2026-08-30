@@ -494,6 +494,16 @@ def test_live_workflow_and_retest_changes_are_reflected(
     assert started.status_code == 200, started.text
     assert _row_for(client, token, finding.id)["workflow"]["state"] == "in_progress"
 
+    recorded = client.post(
+        f"/v1/findings/{finding.id}/remediation",
+        headers=_auth(token),
+        json={"summary": "Updated the application configuration."},
+    )
+    assert recorded.status_code == 201, recorded.text
+    remediation = _row_for(client, token, finding.id)["remediation"]
+    assert remediation["revision_count"] == 1
+    assert remediation["latest_recorded_at"] is not None
+
     ready = client.post(
         f"/v1/findings/{finding.id}/ready-for-retest", headers=_auth(token)
     )
@@ -512,7 +522,7 @@ def test_live_workflow_and_retest_changes_are_reflected(
 # ------------------------------------------------------ workflow truthfulness
 
 
-def test_workflow_maps_every_finding_status_and_exposes_no_remediation_record(
+def test_workflow_maps_every_finding_status_separately_from_remediation(
     client, make_token, seed_user_a, dns_resolver, db_session
 ):
     clerk_a, org_a = seed_user_a
@@ -540,14 +550,17 @@ def test_workflow_maps_every_finding_status_and_exposes_no_remediation_record(
         assert row["status"] == finding_status
         assert row["workflow"]["state"] == workflow_state
         assert set(row["workflow"]) == {"state", "resolved_at"}
+        assert row["remediation"] == {
+            "revision_count": 0,
+            "latest_recorded_at": None,
+        }
         if finding_status == "resolved":
             assert row["workflow"]["resolved_at"] is not None
         else:
             assert row["workflow"]["resolved_at"] is None
 
-    # No fictitious remediation resource, and no static catalog guidance signal.
+    # The compact resource is real, but no body or static catalog signal leaks.
     for absent in (
-        "remediation",
         "remediation_present",
         "remediation_recorded",
         "remediation_updated_at",
@@ -571,6 +584,8 @@ def test_static_guidance_text_is_never_a_remediation_signal(
     assert stored.remediation_guidance  # always non-empty catalog text
     row = _row_for(client, token, finding.id)
     assert row["workflow"]["state"] == "not_started"
+    assert row["remediation"]["revision_count"] == 0
+    assert row["remediation"]["latest_recorded_at"] is None
     assert REASON_REMEDIATION_NOT_STARTED in _codes(row)
 
 
@@ -1163,10 +1178,15 @@ def test_inbox_leaks_no_evidence_or_secret_material(
         "severity",
         "status",
         "workflow",
+        "remediation",
         "retests",
         "promoted_at",
         "last_updated_at",
         "attention_reasons",
+    }
+    assert set(row["remediation"]) == {
+        "revision_count",
+        "latest_recorded_at",
     }
     assert set(row["target"]) == {
         "target_id",
@@ -1410,11 +1430,12 @@ def test_query_count_is_bounded_and_no_heavy_tables_are_touched(
             for item in service_statements
             if item.lstrip().lower().startswith("select")
         ]
-        # 1 finding page + 1 organization summary + 1 latest terminal + 1 rollup.
-        assert len(service_selects) == 4, len(service_selects)
+        # Page + org summary + latest terminal + retest and remediation rollups.
+        assert len(service_selects) == 5, len(service_selects)
         service_sql = " ".join(service_statements).lower()
         assert "findings.evidence" not in service_sql
         assert "retest_attempts.evidence" not in service_sql
+        assert "finding_remediation_revisions.summary" not in service_sql
     finally:
         session.close()
 
@@ -1434,6 +1455,7 @@ MUTATIONS = (
     "startFindingRemediation",
     "markFindingReadyForRetest",
     "queueFindingRetest",
+    "recordFindingRemediation",
 )
 
 
@@ -1479,12 +1501,18 @@ def test_finding_workflow_actions_remain_reachable_from_detail():
     for mutation in MUTATIONS:
         assert mutation in detail, mutation
     assert "fetchFinding(" in detail
+    assert "fetchFindingRemediation(" in detail
+    assert "Record what you changed before requesting a retest." in detail
+    assert "Do not include passwords, API keys, tokens, or other secrets." in detail
+    assert "<textarea" in detail
+    assert "dangerouslySetInnerHTML" not in detail
     assert "fetchFindings(" not in detail
 
 
-def test_inbox_ui_labels_no_remediation_record_and_no_score():
+def test_inbox_ui_labels_compact_remediation_metadata_and_no_score():
     inbox = _dashboard_sources()["findings-inbox-panel.tsx"]
     assert "Workflow:" in inbox
+    assert "Remediation record:" in inbox
     for forbidden in (
         "remediation_present",
         "remediation_recorded",
