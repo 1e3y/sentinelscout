@@ -14,6 +14,7 @@ from app.schemas.finding_remediation import (
     FindingRemediationHistoryResponse,
     FindingRemediationRevisionResponse,
 )
+from app.schemas.finding_timeline import FindingTimelineResponse
 from app.schemas.findings_inbox import (
     CurrentRetestState,
     FindingInboxResponse,
@@ -24,6 +25,7 @@ from app.schemas.retest import RetestAttemptResponse
 from app.services.authorization import assert_actor_org
 from app.services.findings import (
     get_finding_or_404,
+    list_finding_timeline,
     list_findings_for_user,
     list_remediation_revisions,
     mark_ready_for_retest,
@@ -33,6 +35,10 @@ from app.services.findings import (
 from app.services.findings.remediation_record import (
     DEFAULT_REMEDIATION_PAGE_SIZE,
     MAX_REMEDIATION_PAGE_SIZE,
+)
+from app.services.findings.timeline import (
+    DEFAULT_TIMELINE_PAGE_SIZE,
+    MAX_TIMELINE_PAGE_SIZE,
 )
 from app.services.findings_inbox import (
     DEFAULT_PAGE_SIZE,
@@ -139,6 +145,28 @@ def get_finding_endpoint(
     finding = get_finding_or_404(db, finding_id=finding_id, user_id=auth.user.id)
     asset = db.get(Asset, finding.asset_id)
     return _to_finding_response(db, finding, asset)
+
+
+@router.get("/{finding_id}/timeline", response_model=FindingTimelineResponse)
+def finding_timeline_endpoint(
+    finding_id: UUID,
+    auth: Annotated[AuthContext, Depends(get_auth_context)],
+    db: Annotated[Session, Depends(get_db)],
+    page_size: Annotated[
+        int, Query(ge=1, le=MAX_TIMELINE_PAGE_SIZE)
+    ] = DEFAULT_TIMELINE_PAGE_SIZE,
+    cursor: str | None = None,
+) -> FindingTimelineResponse:
+    """Durable history for one Finding in the verified active organization."""
+    require_active_organization(auth)
+    assert auth.active_organization is not None
+    return list_finding_timeline(
+        db,
+        finding_id=finding_id,
+        organization_id=auth.active_organization.id,
+        page_size=page_size,
+        cursor=cursor,
+    )
 
 
 @router.get(

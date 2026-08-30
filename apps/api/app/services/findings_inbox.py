@@ -45,6 +45,11 @@ from app.schemas.findings_inbox import (
     FindingInboxTarget,
     FindingInboxWorkflow,
 )
+from app.services.findings.retest_state import (
+    RETEST_STATE_IN_PROGRESS,
+    RETEST_STATE_NONE,
+    current_retest_state,
+)
 from app.services.reports.summary import OPEN_FINDING_STATUSES
 
 DEFAULT_PAGE_SIZE = 20
@@ -58,8 +63,6 @@ VERIFIED_STATUS = "verified"
 ACTIVE_STATUS_LIST = sorted(ACTIVE_RETEST_STATUSES)
 OPEN_STATUS_LIST = sorted(OPEN_FINDING_STATUSES)
 
-RETEST_STATE_NONE = "none"
-RETEST_STATE_IN_PROGRESS = "in_progress"
 TERMINAL_RETEST_STATES = ("passed", "failed", "inconclusive", "error")
 
 # findings.status -> workflow state. A pure rename, not an inference.
@@ -334,12 +337,13 @@ def _remediation_rollup_by_finding(
 def _current_retest_state(
     *, has_active: bool, latest_terminal: FindingInboxLatestTerminalRetest | None
 ) -> str:
-    """One mutually exclusive state. An active attempt outranks any older result."""
-    if has_active:
-        return RETEST_STATE_IN_PROGRESS
-    if latest_terminal is None:
-        return RETEST_STATE_NONE
-    return latest_terminal.status
+    """Compatibility wrapper around the M30/M32 shared projection."""
+    return current_retest_state(
+        has_active=has_active,
+        latest_terminal_status=(
+            latest_terminal.status if latest_terminal is not None else None
+        ),
+    )
 
 
 def _attention_reasons(

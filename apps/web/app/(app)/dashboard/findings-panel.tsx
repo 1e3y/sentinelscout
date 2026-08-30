@@ -2,17 +2,16 @@
 
 import { useAuth } from "@clerk/nextjs";
 import { useCallback, useEffect, useState, useTransition } from "react";
+import { FindingActivityTimeline } from "./finding-activity-timeline";
 import {
   fetchFinding,
-  fetchFindingRemediation,
-  fetchFindingRetests,
+  fetchFindingTimeline,
   markFindingReadyForRetest,
   queueFindingRetest,
   recordFindingRemediation,
   startFindingRemediation,
-  type FindingRemediationHistory,
   type FindingResponse,
-  type RetestAttemptResponse,
+  type FindingTimelineResponse,
 } from "@/lib/api";
 
 type Props = {
@@ -38,24 +37,6 @@ function statusLabel(status: string): string {
   }
 }
 
-function retestOutcomeLabel(status: string): string | null {
-  switch (status) {
-    case "passed":
-      return "PASS";
-    case "failed":
-      return "FAIL";
-    case "inconclusive":
-      return "INCONCLUSIVE";
-    case "error":
-      return "ERROR";
-    case "pending":
-    case "running":
-      return "Retest in progress";
-    default:
-      return null;
-  }
-}
-
 /**
  * Detail and workflow actions for one finding. The organization-scoped
  * collection lives in FindingsInboxPanel; this panel never lists findings, so
@@ -64,17 +45,13 @@ function retestOutcomeLabel(status: string): string | null {
 export function FindingsPanel({ findingId, onFindingChanged }: Props) {
   const { getToken } = useAuth();
   const [selected, setSelected] = useState<FindingResponse | null>(null);
-  const [retests, setRetests] = useState<RetestAttemptResponse[]>([]);
-  const [remediation, setRemediation] =
-    useState<FindingRemediationHistory | null>(null);
+  const [timeline, setTimeline] = useState<FindingTimelineResponse | null>(null);
   const [remediationSummary, setRemediationSummary] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  const latestRetest = retests[retests.length - 1] ?? null;
-  const retestActive =
-    latestRetest?.status === "pending" || latestRetest?.status === "running";
+  const retestActive = timeline?.current_retest_state === "in_progress";
 
   const load = useCallback(() => {
     startTransition(async () => {
@@ -82,8 +59,7 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
       setMessage(null);
       if (!findingId) {
         setSelected(null);
-        setRetests([]);
-        setRemediation(null);
+        setTimeline(null);
         setRemediationSummary("");
         return;
       }
@@ -93,14 +69,12 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
           setError("Missing session token");
           return;
         }
-        const [finding, attempts, history] = await Promise.all([
+        const [finding, activity] = await Promise.all([
           fetchFinding(token, findingId),
-          fetchFindingRetests(token, findingId),
-          fetchFindingRemediation(token, findingId),
+          fetchFindingTimeline(token, findingId),
         ]);
         setSelected(finding);
-        setRetests(attempts);
-        setRemediation(history);
+        setTimeline(activity);
         setRemediationSummary("");
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load finding");
@@ -129,14 +103,12 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
         }
         await action(token, selected.id);
         setMessage(successMessage);
-        const [finding, attempts, history] = await Promise.all([
+        const [finding, activity] = await Promise.all([
           fetchFinding(token, selected.id),
-          fetchFindingRetests(token, selected.id),
-          fetchFindingRemediation(token, selected.id),
+          fetchFindingTimeline(token, selected.id),
         ]);
         setSelected(finding);
-        setRetests(attempts);
-        setRemediation(history);
+        setTimeline(activity);
         onFindingChanged();
       } catch (err) {
         setError(err instanceof Error ? err.message : failureMessage);
@@ -156,8 +128,8 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
           return;
         }
         await recordFindingRemediation(token, selected.id, remediationSummary);
-        const history = await fetchFindingRemediation(token, selected.id);
-        setRemediation(history);
+        const activity = await fetchFindingTimeline(token, selected.id);
+        setTimeline(activity);
         setRemediationSummary("");
         setMessage("Remediation recorded.");
         onFindingChanged();
@@ -169,8 +141,8 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
     });
   }
 
-  function loadMoreRemediation() {
-    if (!selected || !remediation?.next_cursor) return;
+  function loadMoreActivity() {
+    if (!selected || !timeline?.next_cursor) return;
     startTransition(async () => {
       setError(null);
       try {
@@ -179,23 +151,20 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
           setError("Missing session token");
           return;
         }
-        const next = await fetchFindingRemediation(token, selected.id, {
-          cursor: remediation.next_cursor,
+        const next = await fetchFindingTimeline(token, selected.id, {
+          cursor: timeline.next_cursor,
         });
-        setRemediation((current) =>
+        setTimeline((current) =>
           current
             ? {
                 ...next,
-                latest: current.latest,
-                revisions: [...current.revisions, ...next.revisions],
+                events: [...current.events, ...next.events],
               }
             : next,
         );
       } catch (err) {
         setError(
-          err instanceof Error
-            ? err.message
-            : "Failed to load remediation history",
+          err instanceof Error ? err.message : "Failed to load finding activity",
         );
       }
     });
@@ -208,7 +177,7 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
     selected?.status !== "resolved";
   const readyForRetestBlocked =
     selected?.status === "in_progress" &&
-    (remediation?.revision_count ?? 0) === 0;
+    (timeline?.remediation_revision_count ?? 0) === 0;
 
   return (
     <section className="space-y-4" aria-labelledby="finding-detail-heading">
@@ -347,6 +316,14 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
             </div>
           ) : null}
 
+          {timeline ? (
+            <FindingActivityTimeline
+              timeline={timeline}
+              pending={pending}
+              onLoadMore={loadMoreActivity}
+            />
+          ) : null}
+
           <div className="space-y-3 border-t border-zinc-100 pt-4">
             <div>
               <h4 className="text-sm font-medium text-zinc-800">
@@ -359,57 +336,13 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
               </p>
             </div>
 
-            {remediation?.latest ? (
-              <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
-                <p className="whitespace-pre-wrap text-sm text-zinc-800">
-                  {remediation.latest.summary}
-                </p>
-                <p className="mt-2 text-xs text-zinc-500">
-                  Revision {remediation.latest.revision_number} · Recorded by{" "}
-                  {remediation.latest.created_by_name ?? "Organization member"} ·{" "}
-                  {formatTime(remediation.latest.created_at)}
-                </p>
-              </div>
-            ) : (
-              <p className="text-xs text-zinc-500">
-                No remediation has been recorded.
-              </p>
-            )}
-
-            {remediation && remediation.revisions.length > 0 ? (
-              <details>
-                <summary className="cursor-pointer text-xs font-medium text-zinc-700">
-                  Revision history ({remediation.revision_count})
-                </summary>
-                <ol className="mt-2 space-y-2">
-                  {remediation.revisions.map((revision) => (
-                    <li
-                      key={revision.id}
-                      className="rounded-md border border-zinc-200 p-3"
-                    >
-                      <p className="whitespace-pre-wrap text-sm text-zinc-800">
-                        {revision.summary}
-                      </p>
-                      <p className="mt-2 text-xs text-zinc-500">
-                        Revision {revision.revision_number} · Recorded by{" "}
-                        {revision.created_by_name ?? "Organization member"} ·{" "}
-                        {formatTime(revision.created_at)}
-                      </p>
-                    </li>
-                  ))}
-                </ol>
-                {remediation.next_cursor ? (
-                  <button
-                    type="button"
-                    disabled={pending}
-                    className="mt-2 rounded-md border border-zinc-300 px-3 py-1.5 text-xs disabled:opacity-50"
-                    onClick={loadMoreRemediation}
-                  >
-                    Load older revisions
-                  </button>
-                ) : null}
-              </details>
-            ) : null}
+            <p className="text-xs text-zinc-500">
+              {timeline?.remediation_revision_count
+                ? `${timeline.remediation_revision_count} remediation revision${
+                    timeline.remediation_revision_count === 1 ? "" : "s"
+                  } recorded. Full history appears above.`
+                : "No remediation has been recorded."}
+            </p>
 
             {selected.status !== "resolved" ? (
               <div className="space-y-2">
@@ -510,42 +443,6 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
               </button>
             ) : null}
           </div>
-
-          {latestRetest ? (
-            <div className="space-y-1 rounded-md bg-zinc-50 px-3 py-2 text-xs text-zinc-700">
-              {retestOutcomeLabel(latestRetest.status) ? (
-                <p className="font-medium tracking-wide text-zinc-800">
-                  {retestOutcomeLabel(latestRetest.status)}
-                </p>
-              ) : null}
-              <p>{latestRetest.summary}</p>
-              <p>
-                <span className="text-zinc-500">Retest method: </span>
-                <span className="font-mono">{latestRetest.method}</span>
-              </p>
-              <p>
-                <span className="text-zinc-500">
-                  Original validation reference:{" "}
-                </span>
-                <span className="font-mono break-all">
-                  {latestRetest.original_validation_attempt_id}
-                </span>
-              </p>
-              {latestRetest.evidence?.recheck &&
-              typeof latestRetest.evidence.recheck === "object" ? (
-                <p>
-                  <span className="text-zinc-500">Observable evidence: </span>
-                  <span className="font-mono break-all">
-                    {JSON.stringify(latestRetest.evidence.recheck)}
-                  </span>
-                </p>
-              ) : null}
-              <p>
-                <span className="text-zinc-500">Timestamp: </span>
-                {formatTime(latestRetest.completed_at ?? latestRetest.created_at)}
-              </p>
-            </div>
-          ) : null}
         </div>
       )}
     </section>

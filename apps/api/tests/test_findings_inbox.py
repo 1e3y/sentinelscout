@@ -1501,12 +1501,26 @@ def test_finding_workflow_actions_remain_reachable_from_detail():
     for mutation in MUTATIONS:
         assert mutation in detail, mutation
     assert "fetchFinding(" in detail
-    assert "fetchFindingRemediation(" in detail
+    assert "fetchFindingTimeline(" in detail
+    assert "fetchFindingRemediation(" not in detail
+    assert "fetchFindingRetests(" not in detail
     assert "Record what you changed before requesting a retest." in detail
     assert "Do not include passwords, API keys, tokens, or other secrets." in detail
     assert "<textarea" in detail
     assert "dangerouslySetInnerHTML" not in detail
     assert "fetchFindings(" not in detail
+
+
+def test_finding_activity_timeline_is_read_only_and_plain_text():
+    activity = _dashboard_sources()["finding-activity-timeline.tsx"]
+    for mutation in MUTATIONS:
+        assert mutation not in activity, mutation
+    assert "<textarea" not in activity
+    assert "dangerouslySetInnerHTML" not in activity
+    assert "Customer-recorded work; not verification." in activity
+    assert "Scout observation" in activity
+    assert "Some older workflow timestamps are unavailable." in activity
+    assert "Load older activity" in activity
 
 
 def test_inbox_ui_labels_compact_remediation_metadata_and_no_score():

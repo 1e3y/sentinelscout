@@ -614,6 +614,115 @@ export type FindingRemediationHistory = {
   revisions: FindingRemediationRevision[];
 };
 
+export type FindingTimelineActor = {
+  actor_type: "user" | "worker";
+  user_id: string | null;
+  display_name: string | null;
+};
+
+export type FindingTimelineEvent =
+  | {
+      event_id: string;
+      event_type: "SUPPORTED_FINDING_PROMOTED";
+      occurred_at: string;
+      provenance: "finding_record";
+      actor: FindingTimelineActor | null;
+      title: string;
+      details: { finding_id: string };
+    }
+  | {
+      event_id: string;
+      event_type: "REMEDIATION_STARTED" | "READY_FOR_RETEST";
+      occurred_at: string;
+      provenance: "human_workflow";
+      actor: FindingTimelineActor | null;
+      title: string;
+      details: {
+        from_status: FindingInboxStatus;
+        to_status: FindingInboxStatus;
+      };
+    }
+  | {
+      event_id: string;
+      event_type: "REMEDIATION_REVISION_RECORDED";
+      occurred_at: string;
+      provenance: "human_remediation";
+      actor: FindingTimelineActor | null;
+      title: string;
+      details: {
+        revision_id: string;
+        revision_number: number;
+        summary: string;
+      };
+    }
+  | {
+      event_id: string;
+      event_type: "RETEST_QUEUED";
+      occurred_at: string;
+      provenance: "human_workflow";
+      actor: FindingTimelineActor | null;
+      title: string;
+      details: {
+        retest_attempt_id: string;
+        status_at_read:
+          | "pending"
+          | "running"
+          | "passed"
+          | "failed"
+          | "inconclusive"
+          | "error";
+        queued_at: string;
+      };
+    }
+  | {
+      event_id: string;
+      event_type: "RETEST_COMPLETED";
+      occurred_at: string;
+      provenance: "scout_retest";
+      actor: FindingTimelineActor | null;
+      title: string;
+      details: {
+        retest_attempt_id: string;
+        status: TerminalRetestStatus;
+        completed_at: string;
+        method: string;
+        summary: string;
+      };
+    }
+  | {
+      event_id: string;
+      event_type: "FINDING_RESOLVED";
+      occurred_at: string;
+      provenance: "finding_record";
+      actor: FindingTimelineActor | null;
+      title: string;
+      details: {
+        resolution_basis: "passing_retest" | "link_unavailable";
+        resolving_retest_attempt_id: string | null;
+        statement: string;
+      };
+    };
+
+export type FindingTimelineHistoryGap =
+  | "remediation_started_timestamp_unavailable"
+  | "ready_for_retest_timestamp_unavailable"
+  | "resolution_timestamp_unavailable"
+  | "resolution_retest_link_unavailable"
+  | "retest_completion_timestamp_unavailable"
+  | "workflow_transition_ambiguous";
+
+export type FindingTimelineResponse = {
+  finding_id: string;
+  current_status: FindingInboxStatus;
+  current_retest_state: CurrentRetestState;
+  remediation_revision_count: number;
+  history_completeness: "complete" | "partial";
+  history_gaps: FindingTimelineHistoryGap[];
+  page_size: number;
+  next_cursor: string | null;
+  events: FindingTimelineEvent[];
+};
+
 export type AuditEventResponse = {
   id: string;
   organization_id: string;
@@ -1345,6 +1454,21 @@ export function fetchFindingRemediation(
   const query = params.toString();
   return apiFetch<FindingRemediationHistory>(
     `/v1/findings/${findingId}/remediation${query ? `?${query}` : ""}`,
+    token,
+  );
+}
+
+export function fetchFindingTimeline(
+  token: string,
+  findingId: string,
+  options: { page_size?: number; cursor?: string | null } = {},
+): Promise<FindingTimelineResponse> {
+  const params = new URLSearchParams();
+  if (options.page_size != null) params.set("page_size", String(options.page_size));
+  if (options.cursor) params.set("cursor", options.cursor);
+  const query = params.toString();
+  return apiFetch<FindingTimelineResponse>(
+    `/v1/findings/${findingId}/timeline${query ? `?${query}` : ""}`,
     token,
   );
 }
