@@ -12,7 +12,10 @@ from sqlalchemy.orm import sessionmaker
 from app.core.config import get_settings
 from app.core.db import engine
 from app.core.logging import bind_log_context, clear_log_context, configure_logging
-from app.services.scheduler_runtime import process_one_scheduled_monitoring
+from app.services.scheduler_runtime import (
+    maybe_discover_follow_up_reminders,
+    process_one_scheduled_monitoring,
+)
 
 logger = logging.getLogger("scout.scheduler")
 
@@ -46,12 +49,16 @@ def main() -> None:
         extra={
             "event": "scheduler.start",
             "poll_interval": poll_interval,
+            "follow_up_reminder_discovery_interval_seconds": float(
+                settings.follow_up_reminder_discovery_interval_seconds
+            ),
             "environment": settings.environment,
         },
     )
 
     while not _Shutdown.stop:
         try:
+            maybe_discover_follow_up_reminders(session_factory)
             operation = process_one_scheduled_monitoring(session_factory)
             consecutive_errors = 0
             if operation is None:

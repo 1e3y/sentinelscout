@@ -47,6 +47,9 @@ class OrganizationNotificationSettings(Base):
     )
     email_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     email_min_priority: Mapped[str] = mapped_column(String(16), nullable=False, default="medium")
+    finding_follow_up_reminders_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
     updated_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),

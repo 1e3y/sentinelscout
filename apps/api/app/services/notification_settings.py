@@ -92,6 +92,11 @@ def serialize_notification_settings(
         "email_min_priority": (
             settings.email_min_priority if settings is not None else "medium"
         ),
+        "finding_follow_up_reminders_enabled": (
+            bool(settings.finding_follow_up_reminders_enabled)
+            if settings is not None
+            else False
+        ),
         "recipients": recipients,
         "members": members,
         "can_manage": can_manage,
@@ -105,6 +110,7 @@ def update_notification_settings(
     organization_id: UUID,
     email_enabled: bool,
     email_min_priority: str,
+    finding_follow_up_reminders_enabled: bool,
     recipient_user_ids: list[UUID],
 ) -> OrganizationNotificationSettings:
     assert_admin_actor(actor, organization_id, not_found="Organization not found")
@@ -146,12 +152,14 @@ def update_notification_settings(
             organization_id=organization_id,
             email_enabled=email_enabled,
             email_min_priority=email_min_priority,
+            finding_follow_up_reminders_enabled=finding_follow_up_reminders_enabled,
             updated_by_user_id=actor.user_id,
         )
         db.add(settings)
     else:
         settings.email_enabled = email_enabled
         settings.email_min_priority = email_min_priority
+        settings.finding_follow_up_reminders_enabled = finding_follow_up_reminders_enabled
         settings.updated_by_user_id = actor.user_id
 
     existing = list(
@@ -189,6 +197,7 @@ def update_notification_settings(
             {
                 "email_enabled": email_enabled,
                 "email_min_priority": email_min_priority,
+                "finding_follow_up_reminders_enabled": finding_follow_up_reminders_enabled,
                 "recipient_count": len(unique_ids),
             },
         ),

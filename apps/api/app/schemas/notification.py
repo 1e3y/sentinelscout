@@ -16,6 +16,7 @@ class NotificationSettingsResponse(BaseModel):
     organization_id: str
     email_enabled: bool
     email_min_priority: str
+    finding_follow_up_reminders_enabled: bool = False
     recipients: list[NotificationMemberResponse] = Field(default_factory=list)
     members: list[NotificationMemberResponse] = Field(default_factory=list)
     can_manage: bool
@@ -26,4 +27,5 @@ class NotificationSettingsUpdateRequest(BaseModel):
 
     email_enabled: bool
     email_min_priority: str = "medium"
+    finding_follow_up_reminders_enabled: bool = False
     recipient_user_ids: list[str] = Field(default_factory=list)

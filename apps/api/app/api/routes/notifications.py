@@ -78,6 +78,7 @@ def put_notification_settings_endpoint(
         organization_id=organization.id,
         email_enabled=body.email_enabled,
         email_min_priority=body.email_min_priority,
+        finding_follow_up_reminders_enabled=body.finding_follow_up_reminders_enabled,
         recipient_user_ids=recipient_ids,
     )
     return NotificationSettingsResponse.model_validate(

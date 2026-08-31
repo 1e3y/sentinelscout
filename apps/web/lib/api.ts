@@ -1442,6 +1442,7 @@ export type NotificationSettingsResponse = {
   organization_id: string;
   email_enabled: boolean;
   email_min_priority: string;
+  finding_follow_up_reminders_enabled: boolean;
   recipients: NotificationMember[];
   members: NotificationMember[];
   can_manage: boolean;
@@ -1450,6 +1451,7 @@ export type NotificationSettingsResponse = {
 export type NotificationSettingsUpdateRequest = {
   email_enabled: boolean;
   email_min_priority: string;
+  finding_follow_up_reminders_enabled: boolean;
   recipient_user_ids: string[];
 };
 

@@ -47,6 +47,17 @@ class Settings(BaseSettings):
             "SCHEDULER_POLL_INTERVAL", "SCHEDULER_POLL_INTERVAL_SECONDS"
         ),
     )
+    follow_up_reminder_discovery_interval_seconds: float = Field(
+        default=900.0,
+        validation_alias=AliasChoices(
+            "FOLLOW_UP_REMINDER_DISCOVERY_INTERVAL_SECONDS",
+            "FOLLOW_UP_REMINDER_DISCOVERY_INTERVAL",
+        ),
+    )
+    follow_up_reminder_discovery_batch_size: int = Field(
+        default=100,
+        alias="FOLLOW_UP_REMINDER_DISCOVERY_BATCH_SIZE",
+    )
 
     scout_max_discovered_assets: int = Field(
         default=500,

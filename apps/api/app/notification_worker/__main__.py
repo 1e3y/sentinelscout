@@ -13,6 +13,7 @@ from app.core.config import get_settings
 from app.core.db import engine
 from app.core.logging import bind_log_context, configure_logging
 from app.services.email_provider import build_email_provider
+from app.services.findings.follow_up_reminders import process_one_follow_up_reminder
 from app.services.notification_runtime import (
     NotificationWorkerNotReady,
     email_delivery_readiness,
@@ -106,6 +107,11 @@ def main() -> None:
                 session_factory, provider=provider, settings=settings
             )
             if row is not None:
+                did_work = True
+            reminder = process_one_follow_up_reminder(
+                session_factory, provider=provider, settings=settings
+            )
+            if reminder is not None:
                 did_work = True
             if crypto_ok:
                 report_row = process_one_report_delivery_email(

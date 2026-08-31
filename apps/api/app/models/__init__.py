@@ -12,6 +12,7 @@ from app.models.coverage import OperationCoverageSummary
 from app.models.diff import OperationDiffSummary
 from app.models.finding import Finding
 from app.models.finding_follow_up import FindingFollowUpChange
+from app.models.finding_follow_up_reminder import FindingFollowUpReminderJob
 from app.models.finding_remediation import FindingRemediationRevision
 from app.models.monitoring import (
     MonitoringConfiguration,
@@ -54,6 +55,7 @@ __all__ = [
     "DiscoveryObservation",
     "Finding",
     "FindingFollowUpChange",
+    "FindingFollowUpReminderJob",
     "FindingRemediationRevision",
     "MonitoringConfiguration",
     "MonitoringReportDeliveryRecipient",

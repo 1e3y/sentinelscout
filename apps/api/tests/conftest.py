@@ -50,11 +50,27 @@ reset_settings_cache()
 class FakeClerkDirectory:
     users: dict[str, ClerkUserInfo] = field(default_factory=dict)
     memberships: dict[str, list[ClerkOrgMembership]] = field(default_factory=dict)
+    fail_get_user: bool = False
+    fail_memberships: bool = False
 
     def get_user(self, clerk_user_id: str) -> ClerkUserInfo:
+        if self.fail_get_user:
+            from fastapi import HTTPException, status
+
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Failed to fetch user from Clerk",
+            )
         return self.users[clerk_user_id]
 
     def list_organization_memberships(self, clerk_user_id: str) -> list[ClerkOrgMembership]:
+        if self.fail_memberships:
+            from fastapi import HTTPException, status
+
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Failed to fetch organization memberships from Clerk",
+            )
         return list(self.memberships.get(clerk_user_id, []))
 
     def list_organization_members(

@@ -3,23 +3,70 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload, sessionmaker
 
+from app.core.config import get_settings
 from app.models.monitoring import MonitoringConfiguration
 from app.models.operation import Operation
 from app.models.operation_controls import TESTING_PROFILE_SAFE_PRODUCTION
 from app.models.target import AuthorizedTarget
 from app.models.user import User
 from app.services.audit import record_audit
+from app.services.findings.follow_up_reminders import discover_follow_up_reminder_jobs
 from app.services.monitoring import compute_next_run_at, target_authorized_for_monitoring
 from app.services.operation_controls import create_control_snapshot
 from app.services.operations import append_event
 
 logger = logging.getLogger(__name__)
+
+_last_follow_up_discovery_monotonic: float | None = None
+
+
+def reset_follow_up_discovery_throttle_for_tests() -> None:
+    global _last_follow_up_discovery_monotonic
+    _last_follow_up_discovery_monotonic = None
+
+
+def maybe_discover_follow_up_reminders(
+    session_factory: sessionmaker[Session],
+    *,
+    force: bool = False,
+    now: datetime | None = None,
+) -> int:
+    """Throttled DB-only discovery of due follow-up reminder intents."""
+    global _last_follow_up_discovery_monotonic
+    settings = get_settings()
+    interval = float(settings.follow_up_reminder_discovery_interval_seconds)
+    batch_size = int(settings.follow_up_reminder_discovery_batch_size)
+    monotonic_now = time.monotonic()
+    if (
+        not force
+        and _last_follow_up_discovery_monotonic is not None
+        and (monotonic_now - _last_follow_up_discovery_monotonic) < interval
+    ):
+        return 0
+    _last_follow_up_discovery_monotonic = monotonic_now
+    db = session_factory()
+    try:
+        inserted = discover_follow_up_reminder_jobs(
+            db, now=now, batch_size=batch_size
+        )
+        if inserted:
+            logger.info(
+                "follow-up reminder intents discovered",
+                extra={
+                    "event": "scheduler.follow_up_reminders_discovered",
+                    "inserted": inserted,
+                },
+            )
+        return inserted
+    finally:
+        db.close()
 
 
 def _active_scheduled_operation(db: Session, *, target_id: UUID) -> Operation | None:

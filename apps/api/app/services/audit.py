@@ -57,6 +57,7 @@ _AUDIT_METADATA_ALLOWLIST = frozenset(
         "alert_count",
         "email_enabled",
         "email_min_priority",
+        "finding_follow_up_reminders_enabled",
         "recipient_count",
         "outbox_id",
         "channel",

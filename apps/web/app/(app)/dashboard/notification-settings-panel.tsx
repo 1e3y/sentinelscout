@@ -21,6 +21,8 @@ export function NotificationSettingsPanel({ enabled }: Props) {
   );
   const [emailEnabled, setEmailEnabled] = useState(false);
   const [minPriority, setMinPriority] = useState("medium");
+  const [followUpRemindersEnabled, setFollowUpRemindersEnabled] =
+    useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -48,6 +50,7 @@ export function NotificationSettingsPanel({ enabled }: Props) {
         setSettings(next);
         setEmailEnabled(next.email_enabled);
         setMinPriority(next.email_min_priority);
+        setFollowUpRemindersEnabled(next.finding_follow_up_reminders_enabled);
         setSelected(next.recipients.map((row) => row.user_id));
       } catch (err) {
         setError(
@@ -90,12 +93,14 @@ export function NotificationSettingsPanel({ enabled }: Props) {
           {
             email_enabled: emailEnabled,
             email_min_priority: minPriority,
+            finding_follow_up_reminders_enabled: followUpRemindersEnabled,
             recipient_user_ids: selected,
           },
         );
         setSettings(next);
         setEmailEnabled(next.email_enabled);
         setMinPriority(next.email_min_priority);
+        setFollowUpRemindersEnabled(next.finding_follow_up_reminders_enabled);
         setSelected(next.recipients.map((row) => row.user_id));
         setMessage("Notification settings saved.");
       } catch (err) {
@@ -167,6 +172,26 @@ export function NotificationSettingsPanel({ enabled }: Props) {
                 </li>
               ))}
             </ul>
+          </div>
+          <div className="border-t border-zinc-200 pt-3">
+            <h3 className="font-medium">Finding follow-up reminders</h3>
+            <p className="mt-1 text-zinc-600">
+              Reminders use the human-chosen due date. They do not change
+              severity. They stop if the Finding resolves or ownership/due
+              changes. The assigned member must remain in the organization.
+              This is separate from alert-email recipients.
+            </p>
+            <label className="mt-2 flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={followUpRemindersEnabled}
+                disabled={pending || !settings.can_manage}
+                onChange={(event) =>
+                  setFollowUpRemindersEnabled(event.target.checked)
+                }
+              />
+              Email assigned members when a follow-up date is due
+            </label>
           </div>
           {settings.can_manage ? (
             <button
