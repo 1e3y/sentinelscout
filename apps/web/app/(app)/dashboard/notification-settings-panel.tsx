@@ -192,6 +192,11 @@ export function NotificationSettingsPanel({ enabled }: Props) {
               />
               Email assigned members when a follow-up date is due
             </label>
+            <p className="mt-2 text-xs text-zinc-500">
+              Delivery status for each Finding is shown on the Finding detail
+              page. Reminder delivery does not appear in Finding activity or
+              assessment reports.
+            </p>
           </div>
           {settings.can_manage ? (
             <button

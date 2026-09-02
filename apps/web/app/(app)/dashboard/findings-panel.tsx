@@ -5,6 +5,8 @@ import { useCallback, useEffect, useState, useTransition } from "react";
 import { FindingActivityTimeline } from "./finding-activity-timeline";
 import {
   fetchFinding,
+  fetchFindingFollowUpReminderHistory,
+  fetchFindingFollowUpReminderStatus,
   fetchFindingTimeline,
   fetchOrganizationMembers,
   markFindingReadyForRetest,
@@ -12,9 +14,12 @@ import {
   recordFindingRemediation,
   startFindingRemediation,
   updateFindingFollowUp,
+  type FindingFollowUpReminderHistoryItem,
+  type FindingFollowUpReminderStatus,
   type FindingResponse,
   type FindingTimelineResponse,
   type OrganizationMember,
+  type ReminderCustomerState,
 } from "@/lib/api";
 
 type Props = {
@@ -51,6 +56,33 @@ function dueWording(
   return due <= Date.now() ? "Overdue" : "Upcoming";
 }
 
+function reminderStateLabel(state: ReminderCustomerState): string {
+  switch (state) {
+    case "disabled":
+      return "Follow-up reminders are turned off for this organization.";
+    case "not_applicable":
+      return "No follow-up reminder applies to this Finding.";
+    case "generation_unavailable":
+      return "Reminder scheduling is unavailable for this older follow-up state.";
+    case "scheduled_for_future":
+      return "Reminder will become eligible at the due time.";
+    case "awaiting_discovery":
+      return "Waiting for due reminder scheduling.";
+    case "pending":
+      return "Reminder pending.";
+    case "processing":
+      return "Reminder is being sent.";
+    case "retrying":
+      return "Delivery retry pending.";
+    case "delivered":
+      return "Reminder delivered.";
+    case "skipped":
+      return "Reminder safely skipped.";
+    case "dead":
+      return "Delivery could not be completed.";
+  }
+}
+
 /**
  * Detail and workflow actions for one finding. The organization-scoped
  * collection lives in FindingsInboxPanel; this panel never lists findings, so
@@ -64,6 +96,12 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
   const [members, setMembers] = useState<OrganizationMember[]>([]);
   const [ownerDraft, setOwnerDraft] = useState("");
   const [dueDraft, setDueDraft] = useState("");
+  const [reminderStatus, setReminderStatus] =
+    useState<FindingFollowUpReminderStatus | null>(null);
+  const [reminderHistory, setReminderHistory] = useState<
+    FindingFollowUpReminderHistoryItem[]
+  >([]);
+  const [showReminderHistory, setShowReminderHistory] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -80,6 +118,9 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
         setRemediationSummary("");
         setOwnerDraft("");
         setDueDraft("");
+        setReminderStatus(null);
+        setReminderHistory([]);
+        setShowReminderHistory(false);
         return;
       }
       try {
@@ -88,14 +129,16 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
           setError("Missing session token");
           return;
         }
-        const [finding, activity, memberPage] = await Promise.all([
+        const [finding, activity, memberPage, reminder] = await Promise.all([
           fetchFinding(token, findingId),
           fetchFindingTimeline(token, findingId),
           fetchOrganizationMembers(token, { page_size: 100 }),
+          fetchFindingFollowUpReminderStatus(token, findingId),
         ]);
         setSelected(finding);
         setTimeline(activity);
         setMembers(memberPage.items);
+        setReminderStatus(reminder);
         setRemediationSummary("");
         setOwnerDraft(finding.follow_up?.owner?.user_id ?? "");
         setDueDraft(
@@ -198,11 +241,42 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
         });
         setSelected({ ...selected, follow_up: followUp });
         setMessage("Follow-up saved");
-        const activity = await fetchFindingTimeline(token, selected.id);
+        const [activity, reminder] = await Promise.all([
+          fetchFindingTimeline(token, selected.id),
+          fetchFindingFollowUpReminderStatus(token, selected.id),
+        ]);
         setTimeline(activity);
+        setReminderStatus(reminder);
+        setReminderHistory([]);
+        setShowReminderHistory(false);
         onFindingChanged();
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to save follow-up");
+      }
+    });
+  }
+
+  function loadReminderHistory() {
+    if (!selected) return;
+    startTransition(async () => {
+      setError(null);
+      try {
+        const token = await getToken();
+        if (!token) {
+          setError("Missing session token");
+          return;
+        }
+        const history = await fetchFindingFollowUpReminderHistory(
+          token,
+          selected.id,
+          { page_size: 20 },
+        );
+        setReminderHistory(history.items);
+        setShowReminderHistory(true);
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Failed to load reminder history",
+        );
       }
     });
   }
@@ -474,6 +548,104 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
               </div>
             )}
           </div>
+
+          {reminderStatus ? (
+            <div className="space-y-3 border-t border-zinc-100 pt-4">
+              <div>
+                <h4 className="text-sm font-medium text-zinc-800">
+                  Follow-up reminder
+                </h4>
+                <p className="text-xs text-zinc-600">
+                  Read-only delivery status for the current follow-up. Not
+                  verification and not Finding activity history.
+                </p>
+              </div>
+              <dl className="grid gap-2 text-xs text-zinc-700">
+                <div>
+                  <dt className="text-zinc-500">Status</dt>
+                  <dd>{reminderStateLabel(reminderStatus.state)}</dd>
+                </div>
+                {reminderStatus.state === "scheduled_for_future" &&
+                reminderStatus.current_generation ? (
+                  <div>
+                    <dt className="text-zinc-500">Eligible at</dt>
+                    <dd>
+                      {formatTime(reminderStatus.current_generation.due_at)}
+                    </dd>
+                  </div>
+                ) : null}
+                {reminderStatus.state === "pending" &&
+                !reminderStatus.email_delivery_enabled ? (
+                  <div>
+                    <dt className="text-zinc-500">Delivery</dt>
+                    <dd>Email delivery is temporarily paused.</dd>
+                  </div>
+                ) : null}
+                {reminderStatus.reminder?.delivered_at ? (
+                  <div>
+                    <dt className="text-zinc-500">Delivered</dt>
+                    <dd>
+                      {formatTime(reminderStatus.reminder.delivered_at)}
+                    </dd>
+                  </div>
+                ) : null}
+                {reminderStatus.reminder?.safe_reason_label ? (
+                  <div>
+                    <dt className="text-zinc-500">Explanation</dt>
+                    <dd>{reminderStatus.reminder.safe_reason_label}</dd>
+                  </div>
+                ) : null}
+              </dl>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-xs disabled:opacity-50"
+                  disabled={pending}
+                  onClick={loadReminderHistory}
+                >
+                  View reminder history
+                </button>
+              </div>
+              {showReminderHistory ? (
+                reminderHistory.length === 0 ? (
+                  <p className="text-xs text-zinc-600">
+                    No reminder delivery records yet.
+                  </p>
+                ) : (
+                  <ul className="space-y-2 text-xs text-zinc-700">
+                    {reminderHistory.map((item, index) => (
+                      <li
+                        key={`${item.created_at}-${item.state}-${index}`}
+                        className="rounded-md border border-zinc-100 px-3 py-2"
+                      >
+                        <p className="font-medium">
+                          {item.state.replaceAll("_", " ")}
+                        </p>
+                        <p className="text-zinc-600">
+                          Due {formatTime(item.due_at)} · Created{" "}
+                          {formatTime(item.created_at)}
+                          {item.delivered_at
+                            ? ` · Delivered ${formatTime(item.delivered_at)}`
+                            : ""}
+                        </p>
+                        {item.owner ? (
+                          <p className="text-zinc-600">
+                            Owner:{" "}
+                            {item.owner.display_name ?? "Organization member"}
+                          </p>
+                        ) : null}
+                        {item.safe_reason_label ? (
+                          <p className="text-zinc-600">
+                            {item.safe_reason_label}
+                          </p>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                )
+              ) : null}
+            </div>
+          ) : null}
 
           {timeline ? (
             <FindingActivityTimeline

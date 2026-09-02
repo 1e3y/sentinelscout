@@ -20,6 +20,10 @@ from app.schemas.finding_follow_up import (
     FindingFollowUpResponse,
     UpdateFindingFollowUpRequest,
 )
+from app.schemas.finding_follow_up_reminder_status import (
+    FindingFollowUpReminderHistoryResponse,
+    FindingFollowUpReminderStatusResponse,
+)
 from app.schemas.finding_remediation import (
     CreateFindingRemediationRevisionRequest,
     FindingRemediationHistoryResponse,
@@ -36,7 +40,9 @@ from app.schemas.retest import RetestAttemptResponse
 from app.services.authorization import assert_actor_org
 from app.services.clerk import ClerkDirectory
 from app.services.findings import (
+    get_finding_follow_up_reminder_status,
     get_finding_or_404,
+    list_finding_follow_up_reminders,
     list_finding_timeline,
     list_findings_for_user,
     list_remediation_revisions,
@@ -46,6 +52,10 @@ from app.services.findings import (
     update_finding_follow_up,
 )
 from app.services.findings.follow_up import resolve_follow_up_response
+from app.services.findings.follow_up_reminder_status import (
+    DEFAULT_HISTORY_PAGE_SIZE,
+    MAX_HISTORY_PAGE_SIZE,
+)
 from app.services.findings.remediation_record import (
     DEFAULT_REMEDIATION_PAGE_SIZE,
     MAX_REMEDIATION_PAGE_SIZE,
@@ -227,6 +237,52 @@ def update_finding_follow_up_endpoint(
         follow_up_due_at=body.follow_up_due_at,
     )
     return result.follow_up
+
+
+@router.get(
+    "/{finding_id}/follow-up-reminder",
+    response_model=FindingFollowUpReminderStatusResponse,
+)
+def finding_follow_up_reminder_status_endpoint(
+    finding_id: UUID,
+    auth: Annotated[AuthContext, Depends(get_auth_context)],
+    db: Annotated[Session, Depends(get_db)],
+) -> FindingFollowUpReminderStatusResponse:
+    """Current-generation follow-up reminder delivery status (read-only)."""
+    require_active_organization(auth)
+    assert auth.active_organization is not None
+    return get_finding_follow_up_reminder_status(
+        db,
+        finding_id=finding_id,
+        user_id=auth.user.id,
+        organization_id=auth.active_organization.id,
+    )
+
+
+@router.get(
+    "/{finding_id}/follow-up-reminders",
+    response_model=FindingFollowUpReminderHistoryResponse,
+)
+def finding_follow_up_reminder_history_endpoint(
+    finding_id: UUID,
+    auth: Annotated[AuthContext, Depends(get_auth_context)],
+    db: Annotated[Session, Depends(get_db)],
+    page_size: Annotated[
+        int, Query(ge=1, le=MAX_HISTORY_PAGE_SIZE)
+    ] = DEFAULT_HISTORY_PAGE_SIZE,
+    cursor: str | None = None,
+) -> FindingFollowUpReminderHistoryResponse:
+    """Historical follow-up reminder delivery ledger (read-only)."""
+    require_active_organization(auth)
+    assert auth.active_organization is not None
+    return list_finding_follow_up_reminders(
+        db,
+        finding_id=finding_id,
+        user_id=auth.user.id,
+        organization_id=auth.active_organization.id,
+        page_size=page_size,
+        cursor=cursor,
+    )
 
 
 @router.get("/{finding_id}/timeline", response_model=FindingTimelineResponse)

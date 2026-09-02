@@ -1,4 +1,8 @@
 from app.services.findings.follow_up import update_finding_follow_up
+from app.services.findings.follow_up_reminder_status import (
+    get_finding_follow_up_reminder_status,
+    list_finding_follow_up_reminders,
+)
 from app.services.findings.promote import promote_candidate_to_finding
 from app.services.findings.remediation import (
     get_finding_or_404,
@@ -13,7 +17,9 @@ from app.services.findings.remediation_record import (
 from app.services.findings.timeline import list_finding_timeline
 
 __all__ = [
+    "get_finding_follow_up_reminder_status",
     "get_finding_or_404",
+    "list_finding_follow_up_reminders",
     "list_finding_timeline",
     "list_findings_for_user",
     "list_remediation_revisions",

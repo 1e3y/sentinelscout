@@ -1587,6 +1587,87 @@ export function updateFindingFollowUp(
   });
 }
 
+export type ReminderCustomerState =
+  | "disabled"
+  | "not_applicable"
+  | "generation_unavailable"
+  | "scheduled_for_future"
+  | "awaiting_discovery"
+  | "pending"
+  | "processing"
+  | "retrying"
+  | "delivered"
+  | "skipped"
+  | "dead";
+
+export type ReminderJobCustomerState =
+  | "pending"
+  | "processing"
+  | "retrying"
+  | "delivered"
+  | "skipped"
+  | "dead";
+
+export type FindingFollowUpReminderStatus = {
+  finding_id: string;
+  reminders_enabled: boolean;
+  email_delivery_enabled: boolean;
+  state: ReminderCustomerState;
+  current_generation: {
+    due_at: string;
+    owner: { user_id: string; display_name: string | null };
+  } | null;
+  reminder: {
+    safe_reason_code: string | null;
+    safe_reason_label: string | null;
+    created_at: string;
+    delivered_at: string | null;
+  } | null;
+};
+
+export type FindingFollowUpReminderHistoryItem = {
+  reminder_kind: "due";
+  due_at: string;
+  owner: { user_id: string; display_name: string | null } | null;
+  state: ReminderJobCustomerState;
+  safe_reason_code: string | null;
+  safe_reason_label: string | null;
+  created_at: string;
+  delivered_at: string | null;
+};
+
+export type FindingFollowUpReminderHistory = {
+  finding_id: string;
+  page_size: number;
+  next_cursor: string | null;
+  items: FindingFollowUpReminderHistoryItem[];
+};
+
+export function fetchFindingFollowUpReminderStatus(
+  token: string,
+  findingId: string,
+): Promise<FindingFollowUpReminderStatus> {
+  return apiFetch<FindingFollowUpReminderStatus>(
+    `/v1/findings/${findingId}/follow-up-reminder`,
+    token,
+  );
+}
+
+export function fetchFindingFollowUpReminderHistory(
+  token: string,
+  findingId: string,
+  options: { page_size?: number; cursor?: string | null } = {},
+): Promise<FindingFollowUpReminderHistory> {
+  const params = new URLSearchParams();
+  if (options.page_size != null) params.set("page_size", String(options.page_size));
+  if (options.cursor) params.set("cursor", options.cursor);
+  const query = params.toString();
+  return apiFetch<FindingFollowUpReminderHistory>(
+    `/v1/findings/${findingId}/follow-up-reminders${query ? `?${query}` : ""}`,
+    token,
+  );
+}
+
 export function queueFindingRetest(
   token: string,
   findingId: string,
