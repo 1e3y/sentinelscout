@@ -7,6 +7,7 @@ import { AssessmentHistoryPanel } from "./assessment-history-panel";
 import { AuditPanel } from "./audit-panel";
 import { FindingsSection } from "./findings-section";
 import { MonitoringPanel } from "./monitoring-panel";
+import { NotificationDeliveriesPanel } from "./notification-deliveries-panel";
 import { NotificationSettingsPanel } from "./notification-settings-panel";
 import { OperationsPanel } from "./operations-panel";
 import { ReportsPanel } from "./reports-panel";
@@ -113,6 +114,10 @@ export default async function DashboardPage() {
           <AssessmentHistoryPanel enabled={Boolean(activeOrg)} />
           <AlertsPanel enabled={Boolean(activeOrg)} />
           <NotificationSettingsPanel enabled={Boolean(activeOrg)} />
+          <NotificationDeliveriesPanel
+            enabled={Boolean(activeOrg)}
+            isAdmin={me?.active_organization_role === "admin"}
+          />
           <OperationsPanel
             enabled={Boolean(activeOrg)}
             isAdmin={me?.active_organization_role === "admin"}

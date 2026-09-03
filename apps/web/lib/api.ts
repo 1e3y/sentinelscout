@@ -1477,6 +1477,112 @@ export function updateNotificationSettings(
   );
 }
 
+export type NotificationDeliveryClass =
+  | "alert_email"
+  | "report_delivery"
+  | "follow_up_reminder";
+
+export type NotificationDeliveryState =
+  | "pending"
+  | "processing"
+  | "retrying"
+  | "delivered"
+  | "skipped"
+  | "dead";
+
+export type NotificationDeliverySafeReasonCode =
+  | "recipient_unavailable"
+  | "recipient_changed"
+  | "delivery_revoked"
+  | "delivery_expired"
+  | "environment_restricted"
+  | "finding_resolved"
+  | "owner_changed"
+  | "due_changed"
+  | "follow_up_generation_changed"
+  | "assignee_not_current_member"
+  | "recipient_no_deliverable_email"
+  | "reminders_disabled"
+  | "identity_provider_unavailable"
+  | "delivery_temporarily_unavailable"
+  | "delivery_issue";
+
+export type NotificationDeliveryRecipient =
+  | {
+      kind: "organization_member";
+      user_id: string;
+      display_name: string | null;
+    }
+  | { kind: "external_recipient" };
+
+export type NotificationDeliveryDetail =
+  | {
+      delivery_class: "alert_email";
+      alert_id: string;
+      alert_type: string;
+      priority: string;
+      category: string;
+    }
+  | {
+      delivery_class: "report_delivery";
+      report_id: string;
+      report_version: number | null;
+      generation_origin: string | null;
+    }
+  | {
+      delivery_class: "follow_up_reminder";
+      finding_id: string;
+      finding_title: string;
+      due_at: string;
+    };
+
+export type NotificationDeliveryRow = {
+  delivery_class: NotificationDeliveryClass;
+  state: NotificationDeliveryState;
+  safe_reason_code: NotificationDeliverySafeReasonCode | null;
+  safe_reason_label: string | null;
+  created_at: string;
+  delivered_at: string | null;
+  target: { target_id: string; domain: string } | null;
+  detail: NotificationDeliveryDetail;
+  recipient: NotificationDeliveryRecipient | null;
+};
+
+export type NotificationDeliveriesResponse = {
+  configuration: {
+    alert_email_enabled: boolean;
+    follow_up_reminders_enabled: boolean;
+    email_delivery_enabled: boolean;
+  };
+  items: NotificationDeliveryRow[];
+  next_cursor: string | null;
+};
+
+export function fetchNotificationDeliveries(
+  token: string,
+  params?: {
+    page_size?: number;
+    cursor?: string;
+    delivery_class?: NotificationDeliveryClass;
+    state?: NotificationDeliveryState;
+  },
+): Promise<NotificationDeliveriesResponse> {
+  const search = new URLSearchParams();
+  if (params?.page_size != null) {
+    search.set("page_size", String(params.page_size));
+  }
+  if (params?.cursor) search.set("cursor", params.cursor);
+  if (params?.delivery_class) {
+    search.set("delivery_class", params.delivery_class);
+  }
+  if (params?.state) search.set("state", params.state);
+  const qs = search.toString();
+  return apiFetch<NotificationDeliveriesResponse>(
+    `/v1/notification-deliveries${qs ? `?${qs}` : ""}`,
+    token,
+  );
+}
+
 export function fetchFinding(
   token: string,
   findingId: string,

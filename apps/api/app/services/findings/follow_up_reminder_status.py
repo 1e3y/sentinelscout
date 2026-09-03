@@ -35,6 +35,7 @@ from app.schemas.finding_follow_up_reminder_status import (
     ReminderJobCustomerState,
     SafeReasonCode,
 )
+from app.services.delivery_status import map_delivery_db_status_to_customer_state
 from app.services.findings.follow_up_reminders import resolve_current_follow_up_generation
 from app.services.findings.remediation import get_finding_or_404
 
@@ -153,20 +154,8 @@ def decode_reminder_history_cursor(raw: str) -> tuple[datetime, UUID]:
 
 
 def map_job_status_to_customer_state(db_status: str) -> ReminderJobCustomerState:
-    if db_status == "pending":
-        return "pending"
-    if db_status == "processing":
-        return "processing"
-    if db_status == "failed":
-        return "retrying"
-    if db_status == "delivered":
-        return "delivered"
-    if db_status == "skipped":
-        return "skipped"
-    if db_status == "dead":
-        return "dead"
-    # Unknown DB status — treat as terminal delivery issue surface via dead/skipped path.
-    return "dead"
+    """Thin wrapper over shared mapper — M35 output vocabulary unchanged."""
+    return map_delivery_db_status_to_customer_state(db_status)
 
 
 def project_safe_reason(

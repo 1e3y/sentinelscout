@@ -11,6 +11,7 @@ from app.api.routes import (
     findings,
     health,
     me,
+    notification_deliveries,
     notifications,
     operations,
     organization_members,
@@ -77,6 +78,7 @@ def create_app(
     app.include_router(findings.router)
     app.include_router(alerts.router)
     app.include_router(notifications.router)
+    app.include_router(notification_deliveries.router)
     app.include_router(audit.router)
     app.include_router(reports.operation_router)
     app.include_router(reports.router)
