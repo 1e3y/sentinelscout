@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from uuid import UUID
 
-from fastapi import HTTPException, status
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.audit import AUDIT_ACTOR_TYPES, AuditEvent
-from app.models.organization import OrganizationMembership
 
 # Explicit allowlist — never store secrets, tokens, bodies, or prompts.
 _AUDIT_METADATA_ALLOWLIST = frozenset(
@@ -133,7 +129,9 @@ def sanitize_audit_metadata(metadata: dict | None) -> dict:
             continue
         if isinstance(value, (str, int, float, bool)) or value is None:
             clean[key] = value
-        elif isinstance(value, list) and all(isinstance(i, (str, int, float, bool)) for i in value):
+        elif isinstance(value, list) and all(
+            isinstance(i, (str, int, float, bool)) for i in value
+        ):
             clean[key] = value[:50]
         else:
             clean[key] = str(value)[:500]
@@ -170,59 +168,4 @@ def record_audit(
     if commit:
         db.commit()
         db.refresh(event)
-    return event
-
-
-def list_audit_events(
-    db: Session,
-    *,
-    user_id: UUID,
-    resource_type: str | None = None,
-    resource_id: UUID | None = None,
-    action: str | None = None,
-    created_after: datetime | None = None,
-    created_before: datetime | None = None,
-    limit: int = 100,
-) -> list[AuditEvent]:
-    org_ids = set(
-        db.scalars(
-            select(OrganizationMembership.organization_id).where(
-                OrganizationMembership.user_id == user_id
-            )
-        ).all()
-    )
-    if not org_ids:
-        return []
-
-    stmt = (
-        select(AuditEvent)
-        .where(AuditEvent.organization_id.in_(org_ids))
-        .order_by(AuditEvent.created_at.desc())
-        .limit(min(max(limit, 1), 500))
-    )
-    if resource_type:
-        stmt = stmt.where(AuditEvent.resource_type == resource_type)
-    if resource_id is not None:
-        stmt = stmt.where(AuditEvent.resource_id == resource_id)
-    if action:
-        stmt = stmt.where(AuditEvent.action == action)
-    if created_after is not None:
-        stmt = stmt.where(AuditEvent.created_at >= created_after)
-    if created_before is not None:
-        stmt = stmt.where(AuditEvent.created_at <= created_before)
-    return list(db.scalars(stmt).all())
-
-
-def get_audit_event_or_404(db: Session, *, event_id: UUID, user_id: UUID) -> AuditEvent:
-    event = db.get(AuditEvent, event_id)
-    if event is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Audit event not found")
-    membership = db.scalar(
-        select(OrganizationMembership).where(
-            OrganizationMembership.user_id == user_id,
-            OrganizationMembership.organization_id == event.organization_id,
-        )
-    )
-    if membership is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Audit event not found")
     return event

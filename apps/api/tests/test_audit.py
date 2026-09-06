@@ -1,3 +1,5 @@
+"""Audit write-path regression + M37 customer contract adaptation."""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -35,8 +37,16 @@ def _create_verified_target(client, token: str, domain: str, dns_resolver) -> st
     return target_id
 
 
-def _actions(events: list[dict]) -> list[str]:
-    return [row["action"] for row in events]
+def _list(client, token: str, **params):
+    return client.get(
+        "/v1/audit-events",
+        headers=_auth(token),
+        params=params or None,
+    )
+
+
+def _actions(body: dict) -> list[str]:
+    return [row["action"] for row in body["items"]]
 
 
 def test_target_creation_and_verification_produce_audit_events(
@@ -48,13 +58,18 @@ def test_target_creation_and_verification_produce_audit_events(
         client, token, "audit-target.example", dns_resolver
     )
 
-    events = client.get("/v1/audit-events", headers=_auth(token)).json()
-    actions = _actions(events)
-    assert "target.created" in actions
-    assert "target.verification_started" in actions
-    assert "target.verified" in actions
+    response = _list(client, token, page_size=50)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert "metadata" not in body
+    assert "items" in body
+    actions = _actions(body)
+    assert "target_created" in actions
+    assert "target_verification_started" in actions
+    assert "target_verified" in actions
     assert any(
-        e["resource_type"] == "target" and e["resource_id"] == target_id for e in events
+        e["resource"]["kind"] == "target" and e["resource"]["id"] == target_id
+        for e in body["items"]
     )
 
 
@@ -71,14 +86,14 @@ def test_scope_change_produces_audit_event(client, make_token, seed_user_a, dns_
     )
     assert response.status_code == 200
 
-    events = client.get(
-        "/v1/audit-events",
-        headers=_auth(token),
-        params={"action": "target.scope_updated"},
+    events = _list(
+        client, token, action="target_scope_changed", page_size=50
     ).json()
-    assert len(events) >= 1
-    assert events[0]["resource_id"] == target_id
-    assert events[0]["metadata"].get("include_subdomains") is True
+    assert len(events["items"]) >= 1
+    row = events["items"][0]
+    assert row["resource"]["id"] == target_id
+    assert row["detail"]["include_subdomains"] is True
+    assert "metadata" not in row
 
 
 def test_operation_creation_stores_immutable_control_snapshot(
@@ -120,18 +135,17 @@ def test_operation_creation_stores_immutable_control_snapshot(
     assert snapshot["operation_source"] == "manual"
     assert snapshot["created_by_user_id"] == body["created_by_user_id"]
 
-    # Later scope change must not mutate the historical snapshot.
     assert (
         client.put(
             f"/v1/targets/{target_id}/scope",
             headers=_auth(token),
-                json={
-                    "include_subdomains": False,
-                    "exclusions": ["later.audit-snapshot.example"],
-                },
-            ).status_code
-            == 200
-        )
+            json={
+                "include_subdomains": False,
+                "exclusions": ["later.audit-snapshot.example"],
+            },
+        ).status_code
+        == 200
+    )
     detail = client.get(f"/v1/operations/{body['id']}", headers=_auth(token)).json()
     assert detail["control_snapshot"]["include_subdomains"] is True
     assert detail["control_snapshot"]["exclusions"] == ["secret.audit-snapshot.example"]
@@ -173,15 +187,14 @@ def test_operation_lifecycle_produces_audit_events(
     )
     assert process_one_operation(factory, tools=tools).status == "completed"
 
-    events = client.get(
-        "/v1/audit-events",
-        headers=_auth(token),
-        params={"resource_id": operation_id},
+    events = _list(
+        client, token, resource_type="assessment", page_size=50
     ).json()
     actions = _actions(events)
-    assert "operation.created" in actions
-    assert "operation.started" in actions
-    assert "operation.completed" in actions
+    assert "assessment_created" in actions
+    assert "assessment_started" in actions
+    assert "assessment_completed" in actions
+    assert any(e["resource"]["id"] == operation_id for e in events["items"])
 
 
 def test_monitoring_changes_produce_audit_events(
@@ -205,14 +218,16 @@ def test_monitoring_changes_produce_audit_events(
     )
     assert disabled.status_code == 200
 
-    events = client.get("/v1/audit-events", headers=_auth(token)).json()
-    actions = _actions(events)
-    assert "monitoring.enabled" in actions
-    assert "monitoring.disabled" in actions
+    events = _list(
+        client, token, action="monitoring_changed", page_size=50
+    ).json()
+    labels = {row["label"] for row in events["items"]}
+    assert "Monitoring enabled" in labels
+    assert "Monitoring disabled" in labels
 
 
 def test_validation_finding_retest_audits_and_provenance(
-    client, make_token, seed_user_a, dns_resolver, engine
+    client, make_token, seed_user_a, dns_resolver, engine, db_session
 ):
     user_id, org_id = seed_user_a
     token = make_token(sub=user_id, org_id=org_id)
@@ -304,7 +319,6 @@ def test_validation_finding_retest_audits_and_provenance(
         == 202
     )
 
-    # Passing retest: condition no longer present.
     http_pass = FakeSafeHttpClient(
         by_host={
             f"staging.{domain}": SafeHttpObservation(
@@ -325,16 +339,23 @@ def test_validation_finding_retest_audits_and_provenance(
     assert detail["provenance"]["retest_attempt_id"]
     assert "retest" in detail["provenance"]["chain"]
 
-    events = client.get("/v1/audit-events", headers=_auth(token)).json()
+    # Hidden pipeline actions remain durable in DB but not customer-visible.
+    db_actions = set(
+        db_session.scalars(select(AuditEvent.action)).all()
+    )
+    assert "validation.requested" in db_actions
+    assert "validation.completed" in db_actions
+
+    events = _list(client, token, page_size=50).json()
     actions = _actions(events)
-    assert "validation.requested" in actions
-    assert "validation.completed" in actions
-    assert "finding.created" in actions
-    assert "finding.remediation_started" in actions
-    assert "finding.ready_for_retest" in actions
-    assert "retest.requested" in actions
-    assert "retest.completed" in actions
-    assert "finding.resolved" in actions
+    assert "validation.requested" not in actions
+    assert "validation.completed" not in actions
+    assert "finding_created" in actions
+    assert "remediation_started" in actions
+    assert "ready_for_retest" in actions
+    assert "retest_requested" in actions
+    assert "retest_completed" in actions
+    assert "finding_resolved" in actions
 
 
 def test_cross_org_audit_access_blocked(
@@ -346,21 +367,26 @@ def test_cross_org_audit_access_blocked(
     token_b = make_token(sub=user_b, org_id=org_b)
     _create_verified_target(client, token_a, "audit-cross.example", dns_resolver)
 
-    events_a = client.get("/v1/audit-events", headers=_auth(token_a)).json()
-    assert any(e["action"] == "target.created" for e in events_a)
+    events_a = _list(client, token_a, page_size=50).json()
+    assert any(e["action"] == "target_created" for e in events_a["items"])
 
-    events_b = client.get("/v1/audit-events", headers=_auth(token_b)).json()
-    assert all(e["organization_id"] != events_a[0]["organization_id"] for e in events_b)
-    assert not any(e["action"] == "target.created" and "audit-cross" in e["summary"] for e in events_b)
+    events_b = _list(client, token_b, page_size=50).json()
+    assert not any(
+        e["action"] == "target_created" and "audit-cross" in (e["resource"]["label"] or "")
+        for e in events_b["items"]
+    )
 
 
-def test_audit_events_immutable_through_api(client, make_token, seed_user_a, dns_resolver):
+def test_audit_events_immutable_through_api(
+    client, make_token, seed_user_a, dns_resolver, db_session
+):
     user_id, org_id = seed_user_a
     token = make_token(sub=user_id, org_id=org_id)
     _create_verified_target(client, token, "audit-immutable.example", dns_resolver)
-    events = client.get("/v1/audit-events", headers=_auth(token)).json()
-    assert events
-    event_id = events[0]["id"]
+    events = _list(client, token, page_size=50).json()
+    assert events["items"]
+    event_id = db_session.scalar(select(AuditEvent.id).limit(1))
+    assert event_id is not None
 
     assert client.patch(
         f"/v1/audit-events/{event_id}",
@@ -421,32 +447,22 @@ def test_audit_filters_work(client, make_token, seed_user_a, dns_resolver):
         json={"target_id": target_id},
     ).json()["id"]
 
-    by_action = client.get(
-        "/v1/audit-events",
-        headers=_auth(token),
-        params={"action": "operation.created"},
-    ).json()
-    assert by_action
-    assert all(e["action"] == "operation.created" for e in by_action)
+    by_action = _list(client, token, action="assessment_created", page_size=50).json()
+    assert by_action["items"]
+    assert all(e["action"] == "assessment_created" for e in by_action["items"])
+    assert any(e["resource"]["id"] == operation_id for e in by_action["items"])
 
-    by_type = client.get(
-        "/v1/audit-events",
-        headers=_auth(token),
-        params={"resource_type": "operation", "resource_id": operation_id},
-    ).json()
-    assert by_type
-    assert all(
-        e["resource_type"] == "operation" and e["resource_id"] == operation_id
-        for e in by_type
-    )
+    by_type = _list(client, token, resource_type="assessment", page_size=50).json()
+    assert by_type["items"]
+    assert all(e["resource"]["kind"] == "assessment" for e in by_type["items"])
+
+    # Internal action strings no longer accepted as filters.
+    invalid = _list(client, token, action="operation.created")
+    assert invalid.status_code == 422
 
     future = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
-    empty = client.get(
-        "/v1/audit-events",
-        headers=_auth(token),
-        params={"created_after": future},
-    ).json()
-    assert empty == []
+    empty = _list(client, token, **{"from": future}).json()
+    assert empty["items"] == []
 
 
 def test_audit_events_persisted_separately_from_operation_events(
@@ -466,15 +482,14 @@ def test_audit_events_persisted_separately_from_operation_events(
     op_events = client.get(
         f"/v1/operations/{operation_id}/events", headers=_auth(token)
     ).json()
-    audit_events = client.get(
-        "/v1/audit-events",
-        headers=_auth(token),
-        params={"resource_id": operation_id},
+    audit_events = _list(
+        client, token, action="assessment_created", page_size=50
     ).json()
     assert op_events
-    assert audit_events
+    assert audit_events["items"]
     assert all("sequence" in e for e in op_events)
-    assert all("actor_type" in e for e in audit_events)
+    assert all("actor" in e for e in audit_events["items"])
+    assert all("metadata" not in e for e in audit_events["items"])
 
     db_session.expire_all()
     persisted = db_session.scalars(

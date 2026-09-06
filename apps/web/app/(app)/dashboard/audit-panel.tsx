@@ -4,11 +4,15 @@ import { useAuth } from "@clerk/nextjs";
 import { useEffect, useState, useTransition } from "react";
 import {
   fetchAuditEvents,
-  type AuditEventResponse,
+  type OrganizationAuditAction,
+  type OrganizationAuditResourceKind,
+  type OrganizationAuditRow,
+  type OrganizationAuditEventsResponse,
 } from "@/lib/api";
 
 type Props = {
   enabled: boolean;
+  isAdmin: boolean;
 };
 
 function formatTime(value: string | null | undefined): string {
@@ -16,24 +20,39 @@ function formatTime(value: string | null | undefined): string {
   return new Date(value).toLocaleString();
 }
 
-function actorLabel(event: AuditEventResponse): string {
-  if (event.actor_user_id) {
-    return `${event.actor_type} · ${event.actor_user_id.slice(0, 8)}…`;
+function actorLabel(row: OrganizationAuditRow): string {
+  if (row.actor.kind === "system") return "System";
+  if (row.actor.kind === "unavailable_user") {
+    return row.actor.user_id
+      ? `Unavailable user · ${row.actor.user_id.slice(0, 8)}…`
+      : "Unavailable user";
   }
-  return event.actor_type;
+  return row.actor.display_name ?? row.actor.user_id?.slice(0, 8) ?? "Member";
 }
 
-export function AuditPanel({ enabled }: Props) {
+function detailSummary(row: OrganizationAuditRow): string | null {
+  const detail = row.detail;
+  if (!detail) return null;
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(detail)) {
+    if (key === "kind" || value == null || value === "") continue;
+    parts.push(`${key}: ${String(value)}`);
+  }
+  return parts.length ? parts.join(" · ") : null;
+}
+
+export function AuditPanel({ enabled, isAdmin }: Props) {
   const { getToken } = useAuth();
-  const [events, setEvents] = useState<AuditEventResponse[]>([]);
-  const [resourceType, setResourceType] = useState("");
-  const [action, setAction] = useState("");
-  const [resourceId, setResourceId] = useState("");
+  const [data, setData] = useState<OrganizationAuditEventsResponse | null>(null);
+  const [action, setAction] = useState<OrganizationAuditAction | "">("");
+  const [resourceType, setResourceType] = useState<
+    OrganizationAuditResourceKind | ""
+  >("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  function refresh() {
-    if (!enabled) return;
+  function refresh(nextCursor: string | null = null) {
+    if (!enabled || !isAdmin) return;
     startTransition(async () => {
       setError(null);
       try {
@@ -43,130 +62,158 @@ export function AuditPanel({ enabled }: Props) {
           return;
         }
         const next = await fetchAuditEvents(token, {
-          resource_type: resourceType.trim() || undefined,
-          action: action.trim() || undefined,
-          resource_id: resourceId.trim() || undefined,
-          limit: 100,
+          page_size: 20,
+          cursor: nextCursor ?? undefined,
+          action: action || undefined,
+          resource_type: resourceType || undefined,
         });
-        setEvents(next);
+        setData(next);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load audit events");
+        setError(
+          err instanceof Error ? err.message : "Failed to load audit events",
+        );
       }
     });
   }
 
   useEffect(() => {
-    refresh();
+    refresh(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled]);
+  }, [enabled, isAdmin, action, resourceType]);
+
+  if (!enabled) return null;
+
+  if (!isAdmin) {
+    return (
+      <section className="space-y-2">
+        <h2 className="text-lg font-medium">Audit trail</h2>
+        <p className="text-sm text-zinc-600">
+          Organization admins can review administrative and workflow audit
+          history for this organization.
+        </p>
+      </section>
+    );
+  }
 
   return (
     <section className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-medium">Audit</h2>
-          <p className="text-sm text-zinc-600">
-            Organization-scoped trail of who acted on targets, operations,
-            findings, and monitoring.
-          </p>
-        </div>
+      <div className="space-y-1">
+        <h2 className="text-lg font-medium">Audit trail</h2>
+        <p className="text-sm text-zinc-600">
+          Read-only history of administrative and workflow actions. Delivery
+          email history is in Notification deliveries.
+        </p>
+      </div>
+
+      <div className="flex flex-wrap gap-3 text-sm">
+        <label className="flex items-center gap-2">
+          <span className="text-zinc-500">Action</span>
+          <select
+            className="rounded border border-zinc-300 px-2 py-1"
+            value={action}
+            onChange={(event) =>
+              setAction(event.target.value as OrganizationAuditAction | "")
+            }
+          >
+            <option value="">All</option>
+            <option value="target_created">Target created</option>
+            <option value="target_verified">Target verified</option>
+            <option value="target_scope_changed">Target scope changed</option>
+            <option value="assessment_created">Assessment created</option>
+            <option value="assessment_completed">Assessment completed</option>
+            <option value="monitoring_changed">Monitoring changed</option>
+            <option value="notification_settings_changed">
+              Notification settings
+            </option>
+            <option value="finding_created">Finding created</option>
+            <option value="finding_follow_up_changed">Follow-up changed</option>
+            <option value="remediation_started">Remediation started</option>
+            <option value="ready_for_retest">Ready for retest</option>
+            <option value="retest_requested">Retest requested</option>
+            <option value="finding_resolved">Finding resolved</option>
+            <option value="report_generated">Report generated</option>
+            <option value="report_share_created">Share created</option>
+            <option value="report_share_revoked">Share revoked</option>
+            <option value="alert_acknowledged">Alert acknowledged</option>
+          </select>
+        </label>
+        <label className="flex items-center gap-2">
+          <span className="text-zinc-500">Resource</span>
+          <select
+            className="rounded border border-zinc-300 px-2 py-1"
+            value={resourceType}
+            onChange={(event) =>
+              setResourceType(
+                event.target.value as OrganizationAuditResourceKind | "",
+              )
+            }
+          >
+            <option value="">All</option>
+            <option value="target">Target</option>
+            <option value="assessment">Assessment</option>
+            <option value="monitoring">Monitoring</option>
+            <option value="notification_settings">Notification settings</option>
+            <option value="finding">Finding</option>
+            <option value="retest">Retest</option>
+            <option value="report">Report</option>
+            <option value="report_share">Report share</option>
+            <option value="candidate">Candidate</option>
+            <option value="alert">Alert</option>
+          </select>
+        </label>
         <button
           type="button"
-          disabled={pending || !enabled}
-          onClick={refresh}
-          className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm disabled:opacity-50"
+          className="rounded border border-zinc-300 px-3 py-1"
+          disabled={pending}
+          onClick={() => refresh(null)}
         >
           Refresh
         </button>
       </div>
 
-      {!enabled ? (
-        <p className="text-sm text-zinc-600">
-          Select an organization to view audit events.
-        </p>
-      ) : (
-        <>
-          <div className="flex flex-wrap items-end gap-3 text-sm">
-            <label className="space-y-1">
-              <span className="text-zinc-500">Action</span>
-              <input
-                value={action}
-                onChange={(e) => setAction(e.target.value)}
-                placeholder="operation.created"
-                className="block w-48 rounded-md border border-zinc-300 px-2 py-1.5 font-mono text-xs"
-              />
-            </label>
-            <label className="space-y-1">
-              <span className="text-zinc-500">Resource type</span>
-              <input
-                value={resourceType}
-                onChange={(e) => setResourceType(e.target.value)}
-                placeholder="operation"
-                className="block w-40 rounded-md border border-zinc-300 px-2 py-1.5 font-mono text-xs"
-              />
-            </label>
-            <label className="space-y-1">
-              <span className="text-zinc-500">Resource id</span>
-              <input
-                value={resourceId}
-                onChange={(e) => setResourceId(e.target.value)}
-                placeholder="uuid"
-                className="block w-64 rounded-md border border-zinc-300 px-2 py-1.5 font-mono text-xs"
-              />
-            </label>
-            <button
-              type="button"
-              disabled={pending}
-              onClick={refresh}
-              className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm disabled:opacity-50"
-            >
-              Apply filters
-            </button>
-          </div>
+      {error ? <p className="text-sm text-red-700">{error}</p> : null}
 
-          {error ? (
-            <p className="text-sm text-red-700">{error}</p>
-          ) : null}
-
-          {events.length === 0 ? (
-            <p className="text-sm text-zinc-600">No audit events yet.</p>
-          ) : (
-            <div className="overflow-x-auto rounded-md border border-zinc-200">
-              <table className="min-w-full text-left text-sm">
-                <thead className="border-b border-zinc-200 bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500">
-                  <tr>
-                    <th className="px-3 py-2 font-medium">Timestamp</th>
-                    <th className="px-3 py-2 font-medium">Actor</th>
-                    <th className="px-3 py-2 font-medium">Action</th>
-                    <th className="px-3 py-2 font-medium">Resource</th>
-                    <th className="px-3 py-2 font-medium">Summary</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-zinc-100">
-                  {events.map((event) => (
-                    <tr key={event.id}>
-                      <td className="whitespace-nowrap px-3 py-2 text-xs text-zinc-600">
-                        {formatTime(event.created_at)}
-                      </td>
-                      <td className="px-3 py-2 font-mono text-xs">
-                        {actorLabel(event)}
-                      </td>
-                      <td className="px-3 py-2 font-mono text-xs">{event.action}</td>
-                      <td className="px-3 py-2 font-mono text-xs">
-                        {event.resource_type}
-                        {event.resource_id
-                          ? ` · ${event.resource_id.slice(0, 8)}…`
-                          : ""}
-                      </td>
-                      <td className="px-3 py-2 text-zinc-700">{event.summary}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+      <ul className="divide-y divide-zinc-200 border-y border-zinc-200 text-sm">
+        {(data?.items ?? []).map((row, index) => (
+          <li
+            key={`${row.action}-${row.occurred_at}-${index}`}
+            className="grid gap-1 py-3"
+          >
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <p className="font-medium text-zinc-900">{row.label}</p>
+              <p className="text-zinc-500">{formatTime(row.occurred_at)}</p>
             </div>
-          )}
-        </>
-      )}
+            <p className="text-zinc-700">
+              {actorLabel(row)} · {row.resource.label ?? row.resource.kind}
+            </p>
+            {detailSummary(row) ? (
+              <p className="text-zinc-600">{detailSummary(row)}</p>
+            ) : null}
+          </li>
+        ))}
+        {!pending && data && data.items.length === 0 ? (
+          <li className="py-3 text-zinc-500">No audit events match these filters.</li>
+        ) : null}
+      </ul>
+
+      <div className="flex gap-3">
+        <button
+          type="button"
+          className="rounded border border-zinc-300 px-3 py-1 text-sm disabled:opacity-40"
+          disabled={pending}
+          onClick={() => refresh(null)}
+        >
+          First page
+        </button>
+        <button
+          type="button"
+          className="rounded border border-zinc-300 px-3 py-1 text-sm disabled:opacity-40"
+          disabled={pending || !data?.next_cursor}
+          onClick={() => refresh(data?.next_cursor ?? null)}
+        >
+          Load older
+        </button>
+      </div>
     </section>
   );
 }

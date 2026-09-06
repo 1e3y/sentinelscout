@@ -39,6 +39,8 @@ def test_operation_and_audit_still_work(client, make_token, seed_user_a, dns_res
     events = client.get(
         "/v1/audit-events",
         headers=_auth(token),
-        params={"action": "operation.created"},
-    ).json()
-    assert any(e["resource_id"] == body["id"] for e in events)
+        params={"action": "assessment_created"},
+    )
+    assert events.status_code == 200, events.text
+    audit = events.json()
+    assert any(e["resource"]["id"] == body["id"] for e in audit["items"])

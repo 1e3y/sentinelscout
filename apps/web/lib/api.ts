@@ -759,18 +759,99 @@ export type FindingTimelineResponse = {
   events: FindingTimelineEvent[];
 };
 
-export type AuditEventResponse = {
-  id: string;
-  organization_id: string;
-  actor_type: string;
-  actor_user_id: string | null;
-  action: string;
-  resource_type: string;
-  resource_id: string | null;
-  summary: string;
-  metadata: Record<string, unknown>;
-  created_at: string;
+export type OrganizationAuditAction =
+  | "target_created"
+  | "target_verification_started"
+  | "target_verified"
+  | "target_scope_changed"
+  | "target_revoked"
+  | "assessment_created"
+  | "assessment_started"
+  | "assessment_stopped"
+  | "assessment_completed"
+  | "assessment_failed"
+  | "monitoring_changed"
+  | "notification_settings_changed"
+  | "finding_created"
+  | "remediation_started"
+  | "ready_for_retest"
+  | "remediation_recorded"
+  | "finding_follow_up_changed"
+  | "finding_resolved"
+  | "retest_requested"
+  | "retest_completed"
+  | "candidate_dismissed"
+  | "alert_acknowledged"
+  | "report_generated"
+  | "report_share_created"
+  | "report_share_revoked";
+
+export type OrganizationAuditResourceKind =
+  | "target"
+  | "assessment"
+  | "monitoring"
+  | "notification_settings"
+  | "finding"
+  | "retest"
+  | "report"
+  | "report_share"
+  | "candidate"
+  | "alert";
+
+export type OrganizationAuditActor = {
+  kind: "organization_member" | "system" | "unavailable_user";
+  user_id: string | null;
+  display_name: string | null;
 };
+
+export type OrganizationAuditResource = {
+  kind: OrganizationAuditResourceKind;
+  id: string | null;
+  label: string | null;
+};
+
+export type OrganizationAuditRow = {
+  action: OrganizationAuditAction;
+  label: string;
+  occurred_at: string;
+  actor: OrganizationAuditActor;
+  resource: OrganizationAuditResource;
+  detail: Record<string, unknown> | null;
+};
+
+export type OrganizationAuditEventsResponse = {
+  items: OrganizationAuditRow[];
+  next_cursor: string | null;
+};
+
+export type OrganizationAuditFilters = {
+  page_size?: number;
+  cursor?: string;
+  action?: OrganizationAuditAction;
+  resource_type?: OrganizationAuditResourceKind;
+  actor_user_id?: string;
+  from?: string;
+  to?: string;
+};
+
+export function fetchAuditEvents(
+  token: string,
+  filters: OrganizationAuditFilters = {},
+): Promise<OrganizationAuditEventsResponse> {
+  const params = new URLSearchParams();
+  if (filters.page_size != null) params.set("page_size", String(filters.page_size));
+  if (filters.cursor) params.set("cursor", filters.cursor);
+  if (filters.action) params.set("action", filters.action);
+  if (filters.resource_type) params.set("resource_type", filters.resource_type);
+  if (filters.actor_user_id) params.set("actor_user_id", filters.actor_user_id);
+  if (filters.from) params.set("from", filters.from);
+  if (filters.to) params.set("to", filters.to);
+  const query = params.toString();
+  return apiFetch<OrganizationAuditEventsResponse>(
+    `/v1/audit-events${query ? `?${query}` : ""}`,
+    token,
+  );
+}
 
 export type RetestAttemptResponse = {
   id: string;
@@ -1789,33 +1870,6 @@ export function fetchFindingRetests(
 ): Promise<RetestAttemptResponse[]> {
   return apiFetch<RetestAttemptResponse[]>(
     `/v1/findings/${findingId}/retests`,
-    token,
-  );
-}
-
-export type AuditEventFilters = {
-  resource_type?: string;
-  resource_id?: string;
-  action?: string;
-  created_after?: string;
-  created_before?: string;
-  limit?: number;
-};
-
-export function fetchAuditEvents(
-  token: string,
-  filters: AuditEventFilters = {},
-): Promise<AuditEventResponse[]> {
-  const params = new URLSearchParams();
-  if (filters.resource_type) params.set("resource_type", filters.resource_type);
-  if (filters.resource_id) params.set("resource_id", filters.resource_id);
-  if (filters.action) params.set("action", filters.action);
-  if (filters.created_after) params.set("created_after", filters.created_after);
-  if (filters.created_before) params.set("created_before", filters.created_before);
-  if (filters.limit != null) params.set("limit", String(filters.limit));
-  const query = params.toString();
-  return apiFetch<AuditEventResponse[]>(
-    `/v1/audit-events${query ? `?${query}` : ""}`,
     token,
   );
 }

@@ -1,23 +1,15 @@
+"""Customer-facing schemas for the audit trail API (Milestone 37).
+
+Legacy raw AuditEventResponse was removed — see organization_audit schemas.
+"""
+
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
-
-
-class AuditEventResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    organization_id: UUID
-    actor_type: str
-    actor_user_id: UUID | None = None
-    action: str
-    resource_type: str
-    resource_id: UUID | None = None
-    summary: str
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    created_at: datetime
 
 
 class OperationControlSnapshotResponse(BaseModel):
