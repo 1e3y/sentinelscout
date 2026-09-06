@@ -27,6 +27,7 @@ ACTION_REPORT_PDF_EXPORT = "report.pdf_export"
 ACTION_REPORT_SHARE_CREATE = "report.share_create"
 ACTION_SHARED_REPORT_COARSE = "shared_report.coarse"
 ACTION_SHARED_REPORT_USE = "shared_report.use"
+ACTION_ORGANIZATION_ACCESS_READ = "organization.access.read"
 SHARED_REPORT_COARSE_PARTITIONS = 64
 
 
@@ -45,6 +46,7 @@ def _limit_for_action(settings: Settings, action: str) -> int:
         ACTION_REPORT_SHARE_CREATE: settings.rate_limit_report_share_create,
         ACTION_SHARED_REPORT_COARSE: settings.rate_limit_shared_report_coarse,
         ACTION_SHARED_REPORT_USE: settings.rate_limit_shared_report_use,
+        ACTION_ORGANIZATION_ACCESS_READ: settings.rate_limit_organization_access_read,
     }.get(action, settings.rate_limit_operation_create)
 
 

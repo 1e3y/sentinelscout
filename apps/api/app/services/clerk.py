@@ -9,6 +9,10 @@ from fastapi import HTTPException, status
 from app.core.config import Settings
 
 
+class CurrentAccessUnavailable(Exception):
+    """Authoritative current org membership could not be verified (M38 fail-closed)."""
+
+
 @dataclass(frozen=True)
 class ClerkUserInfo:
     clerk_user_id: str
@@ -34,6 +38,16 @@ class ClerkOrganizationMember:
     email_verified: bool = False
 
 
+@dataclass(frozen=True)
+class ClerkOrganizationMembershipRaw:
+    """Read-only org membership row for access review (no email / no get_user)."""
+
+    provider_user_id: str
+    external_role: str | None
+    first_name: str | None
+    last_name: str | None
+
+
 class ClerkDirectory(Protocol):
     def get_user(self, clerk_user_id: str) -> ClerkUserInfo: ...
 
@@ -46,6 +60,14 @@ class ClerkDirectory(Protocol):
         limit: int,
         offset: int,
     ) -> tuple[list[ClerkOrganizationMember], int]: ...
+
+    def list_organization_memberships_raw(
+        self,
+        clerk_org_id: str,
+        *,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[ClerkOrganizationMembershipRaw], int | None]: ...
 
 
 class HttpClerkDirectory:
@@ -190,6 +212,75 @@ class HttpClerkDirectory:
             total = total_raw
         else:
             total = offset + len(members)
+        return members, total
+
+    def list_organization_memberships_raw(
+        self,
+        clerk_org_id: str,
+        *,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[ClerkOrganizationMembershipRaw], int | None]:
+        """Strict read-only org memberships page (M38).
+
+        Exactly one Backend API call. Never calls get_user. Never returns email.
+        Any provider / config failure raises ``CurrentAccessUnavailable``.
+        """
+        if not self._settings.clerk_secret_key:
+            raise CurrentAccessUnavailable()
+        if not isinstance(clerk_org_id, str) or not clerk_org_id.strip():
+            raise CurrentAccessUnavailable()
+        if limit < 1 or offset < 0:
+            raise CurrentAccessUnavailable()
+        try:
+            response = self._client.get(
+                f"/organizations/{clerk_org_id}/organization_memberships",
+                params={"limit": limit, "offset": offset},
+            )
+        except (httpx.TimeoutException, httpx.TransportError, httpx.HTTPError) as exc:
+            raise CurrentAccessUnavailable() from exc
+        if response.status_code >= 400:
+            raise CurrentAccessUnavailable()
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise CurrentAccessUnavailable() from exc
+        if not isinstance(payload, dict):
+            raise CurrentAccessUnavailable()
+        items = payload.get("data", [])
+        if not isinstance(items, list):
+            raise CurrentAccessUnavailable()
+        members: list[ClerkOrganizationMembershipRaw] = []
+        for item in items:
+            if not isinstance(item, dict):
+                raise CurrentAccessUnavailable()
+            public_user = item.get("public_user_data")
+            if not isinstance(public_user, dict):
+                raise CurrentAccessUnavailable()
+            provider_user_id = public_user.get("user_id")
+            if not isinstance(provider_user_id, str) or not provider_user_id:
+                # Structurally unusable after pagination — fail the page, never drop.
+                raise CurrentAccessUnavailable()
+            role_raw = item.get("role")
+            external_role = role_raw if isinstance(role_raw, str) else None
+            first_raw = public_user.get("first_name")
+            last_raw = public_user.get("last_name")
+            first_name = first_raw.strip() if isinstance(first_raw, str) and first_raw.strip() else None
+            last_name = last_raw.strip() if isinstance(last_raw, str) and last_raw.strip() else None
+            members.append(
+                ClerkOrganizationMembershipRaw(
+                    provider_user_id=provider_user_id,
+                    external_role=external_role,
+                    first_name=first_name,
+                    last_name=last_name,
+                )
+            )
+        total_raw = payload.get("total_count")
+        total: int | None
+        if isinstance(total_raw, int) and total_raw >= 0:
+            total = total_raw
+        else:
+            total = None
         return members, total
 
 

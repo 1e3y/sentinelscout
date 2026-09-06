@@ -1760,6 +1760,47 @@ export function fetchOrganizationMembers(
   );
 }
 
+export type OrganizationAccessRole = "admin" | "member";
+export type OrganizationAccessRoleState = "recognized" | "unrecognized";
+export type OrganizationAccessAccountLinkState = "linked" | "not_linked";
+export type OrganizationAccessLocalMirrorState =
+  | "not_applicable"
+  | "missing"
+  | "role_matches"
+  | "role_differs";
+
+export type OrganizationAccessMember = {
+  user_id: string | null;
+  display_name: string | null;
+  role: OrganizationAccessRole | null;
+  role_state: OrganizationAccessRoleState;
+  account_link_state: OrganizationAccessAccountLinkState;
+  local_mirror_state: OrganizationAccessLocalMirrorState;
+};
+
+export type OrganizationAccessResponse = {
+  organization: { id: string; name: string };
+  source: "authoritative_current_membership";
+  page_size: number;
+  next_cursor: string | null;
+  total_members: number | null;
+  items: OrganizationAccessMember[];
+};
+
+export function fetchOrganizationAccess(
+  token: string,
+  options: { page_size?: number; cursor?: string | null } = {},
+): Promise<OrganizationAccessResponse> {
+  const params = new URLSearchParams();
+  if (options.page_size != null) params.set("page_size", String(options.page_size));
+  if (options.cursor) params.set("cursor", options.cursor);
+  const query = params.toString();
+  return apiFetch<OrganizationAccessResponse>(
+    `/v1/organization-access${query ? `?${query}` : ""}`,
+    token,
+  );
+}
+
 export function updateFindingFollowUp(
   token: string,
   findingId: string,

@@ -14,6 +14,7 @@ from app.api.routes import (
     notification_deliveries,
     notifications,
     operations,
+    organization_access,
     organization_members,
     organizations,
     reports,
@@ -71,6 +72,7 @@ def create_app(
     app.include_router(me.router)
     app.include_router(organizations.router)
     app.include_router(organization_members.router)
+    app.include_router(organization_access.router)
     app.include_router(targets.router)
     app.include_router(security_overview.router)
     app.include_router(operations.router)

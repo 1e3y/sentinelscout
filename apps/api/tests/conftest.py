@@ -39,7 +39,9 @@ from app.main import create_app
 from app.services.clerk import (
     ClerkOrgMembership,
     ClerkOrganizationMember,
+    ClerkOrganizationMembershipRaw,
     ClerkUserInfo,
+    CurrentAccessUnavailable,
 )
 from app.services.dns import StaticDnsTxtResolver
 
@@ -52,8 +54,13 @@ class FakeClerkDirectory:
     memberships: dict[str, list[ClerkOrgMembership]] = field(default_factory=dict)
     fail_get_user: bool = False
     fail_memberships: bool = False
+    fail_org_memberships_raw: bool = False
+    get_user_calls: int = 0
+    memberships_raw_calls: int = 0
+    list_organization_members_calls: int = 0
 
     def get_user(self, clerk_user_id: str) -> ClerkUserInfo:
+        self.get_user_calls += 1
         if self.fail_get_user:
             from fastapi import HTTPException, status
 
@@ -81,6 +88,7 @@ class FakeClerkDirectory:
         offset: int,
     ) -> tuple[list[ClerkOrganizationMember], int]:
         """Derive org roster from the same membership map used for assignability."""
+        self.list_organization_members_calls += 1
         members: list[ClerkOrganizationMember] = []
         for clerk_user_id, rows in self.memberships.items():
             if not any(row.clerk_org_id == clerk_org_id for row in rows):
@@ -98,6 +106,43 @@ class FakeClerkDirectory:
         total = len(members)
         if limit < 1 or offset < 0:
             return [], total
+        return members[offset : offset + limit], total
+
+    def list_organization_memberships_raw(
+        self,
+        clerk_org_id: str,
+        *,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[ClerkOrganizationMembershipRaw], int | None]:
+        """Read-only org memberships page (M38). Never calls get_user."""
+        self.memberships_raw_calls += 1
+        if self.fail_org_memberships_raw:
+            raise CurrentAccessUnavailable()
+        members: list[ClerkOrganizationMembershipRaw] = []
+        for clerk_user_id, rows in self.memberships.items():
+            match = next((row for row in rows if row.clerk_org_id == clerk_org_id), None)
+            if match is None:
+                continue
+            info = self.users.get(clerk_user_id)
+            first_name: str | None = None
+            last_name: str | None = None
+            if info is not None and info.name:
+                parts = info.name.split(None, 1)
+                first_name = parts[0] if parts else None
+                last_name = parts[1] if len(parts) > 1 else None
+            members.append(
+                ClerkOrganizationMembershipRaw(
+                    provider_user_id=clerk_user_id,
+                    external_role=match.role,
+                    first_name=first_name,
+                    last_name=last_name,
+                )
+            )
+        members.sort(key=lambda row: row.provider_user_id)
+        total = len(members)
+        if limit < 1 or offset < 0:
+            raise CurrentAccessUnavailable()
         return members[offset : offset + limit], total
 
 

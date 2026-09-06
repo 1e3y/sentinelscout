@@ -10,6 +10,7 @@ import { MonitoringPanel } from "./monitoring-panel";
 import { NotificationDeliveriesPanel } from "./notification-deliveries-panel";
 import { NotificationSettingsPanel } from "./notification-settings-panel";
 import { OperationsPanel } from "./operations-panel";
+import { OrganizationAccessPanel } from "./organization-access-panel";
 import { ReportsPanel } from "./reports-panel";
 import { SecurityOverviewPanel } from "./security-overview-panel";
 import { TargetsPanel } from "./targets-panel";
@@ -126,6 +127,10 @@ export default async function DashboardPage() {
           <FindingsSection enabled={Boolean(activeOrg)} />
           <ReportsPanel enabled={Boolean(activeOrg)} />
           <AuditPanel
+            enabled={Boolean(activeOrg)}
+            isAdmin={me?.active_organization_role === "admin"}
+          />
+          <OrganizationAccessPanel
             enabled={Boolean(activeOrg)}
             isAdmin={me?.active_organization_role === "admin"}
           />

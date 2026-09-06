@@ -98,6 +98,9 @@ class Settings(BaseSettings):
         default=120, alias="RATE_LIMIT_SHARED_REPORT_COARSE"
     )
     rate_limit_shared_report_use: int = Field(default=60, alias="RATE_LIMIT_SHARED_REPORT_USE")
+    rate_limit_organization_access_read: int = Field(
+        default=60, alias="RATE_LIMIT_ORGANIZATION_ACCESS_READ"
+    )
     rate_limit_window_seconds: int = Field(default=3600, alias="RATE_LIMIT_WINDOW_SECONDS")
 
     email_delivery_enabled: bool = Field(default=False, alias="EMAIL_DELIVERY_ENABLED")
