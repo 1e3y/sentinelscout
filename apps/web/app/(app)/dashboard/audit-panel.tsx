@@ -138,6 +138,9 @@ export function AuditPanel({ enabled, isAdmin }: Props) {
               Member role changed
             </option>
             <option value="organization_member_removed">Member removed</option>
+            <option value="organization_invitation_created">
+              Invitation created
+            </option>
             <option value="alert_acknowledged">Alert acknowledged</option>
           </select>
         </label>

@@ -37,14 +37,19 @@ from app.core.db import Base, get_db
 from app.core.security import StaticKeyTokenVerifier
 from app.main import create_app
 from app.services.clerk import (
+    ClerkMembershipNotFound,
     ClerkOrgMembership,
+    ClerkOrganizationInvitationRaw,
     ClerkOrganizationMember,
     ClerkOrganizationMembershipRaw,
     ClerkUserInfo,
-    ClerkMembershipNotFound,
     CurrentAccessUnavailable,
     OrganizationAccessWriteAmbiguous,
     OrganizationAccessWriteUnavailable,
+    OrganizationInvitationAlreadyMember,
+    OrganizationInvitationAmbiguous,
+    OrganizationInvitationDuplicatePending,
+    OrganizationInvitationUnavailable,
 )
 from app.services.dns import StaticDnsTxtResolver
 
@@ -55,10 +60,18 @@ reset_settings_cache()
 class FakeClerkDirectory:
     users: dict[str, ClerkUserInfo] = field(default_factory=dict)
     memberships: dict[str, list[ClerkOrgMembership]] = field(default_factory=dict)
+    invitations: dict[str, list[ClerkOrganizationInvitationRaw]] = field(default_factory=dict)
     fail_get_user: bool = False
     fail_memberships: bool = False
     fail_org_memberships_raw: bool = False
     fail_get_membership: bool = False
+    fail_list_invitations: bool = False
+    # None | "non_pending" | "missing_created_at"
+    list_invitations_corrupt: str | None = None
+    # None | "unavailable" | "ambiguous" | "ambiguous_applied" |
+    # "ambiguous_applied_other_inviter" | "ambiguous_applied_stale" |
+    # "already_member" | "duplicate"
+    create_invitation_mode: str | None = None
     # None | "unavailable" | "ambiguous" | "ambiguous_applied"
     update_role_mode: str | None = None
     # None | "unavailable" | "ambiguous" | "ambiguous_applied"
@@ -69,6 +82,9 @@ class FakeClerkDirectory:
     get_membership_calls: int = 0
     update_role_calls: int = 0
     delete_membership_calls: int = 0
+    list_invitations_calls: int = 0
+    create_invitation_calls: int = 0
+    _invitation_seq: int = 0
 
     def get_user(self, clerk_user_id: str) -> ClerkUserInfo:
         self.get_user_calls += 1
@@ -251,6 +267,121 @@ class FakeClerkDirectory:
         if len(remaining) == len(rows):
             raise ClerkMembershipNotFound()
         self.memberships[clerk_user_id] = remaining
+
+    def list_organization_invitations(
+        self,
+        clerk_org_id: str,
+        *,
+        status: str | None = None,
+        email_address: str | None = None,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[ClerkOrganizationInvitationRaw], int | None]:
+        self.list_invitations_calls += 1
+        if self.fail_list_invitations:
+            raise OrganizationInvitationUnavailable()
+        if limit < 1 or offset < 0:
+            raise OrganizationInvitationUnavailable()
+        rows = list(self.invitations.get(clerk_org_id, []))
+        if status is not None:
+            rows = [row for row in rows if row.status == status]
+        if email_address is not None:
+            rows = [row for row in rows if row.email_address == email_address]
+        rows.sort(
+            key=lambda row: row.created_at_ms if row.created_at_ms is not None else 0,
+            reverse=True,
+        )
+        if self.list_invitations_corrupt == "non_pending" and rows:
+            bad = rows[0]
+            rows[0] = ClerkOrganizationInvitationRaw(
+                provider_invitation_id=bad.provider_invitation_id,
+                email_address=bad.email_address,
+                external_role=bad.external_role,
+                status="accepted",
+                inviter_user_id=bad.inviter_user_id,
+                created_at_ms=bad.created_at_ms,
+                expires_at_ms=bad.expires_at_ms,
+            )
+        elif self.list_invitations_corrupt == "missing_created_at" and rows:
+            bad = rows[0]
+            rows[0] = ClerkOrganizationInvitationRaw(
+                provider_invitation_id=bad.provider_invitation_id,
+                email_address=bad.email_address,
+                external_role=bad.external_role,
+                status=bad.status,
+                inviter_user_id=bad.inviter_user_id,
+                created_at_ms=None,
+                expires_at_ms=bad.expires_at_ms,
+            )
+        total = len(rows)
+        return rows[offset : offset + limit], total
+
+    def create_organization_invitation(
+        self,
+        clerk_org_id: str,
+        *,
+        email_address: str,
+        role: str,
+        inviter_user_id: str,
+        notify: bool = True,
+    ) -> ClerkOrganizationInvitationRaw:
+        self.create_invitation_calls += 1
+        assert notify is True
+        mode = self.create_invitation_mode
+        if mode == "unavailable":
+            raise OrganizationInvitationUnavailable()
+        if mode == "already_member":
+            raise OrganizationInvitationAlreadyMember()
+        if mode == "duplicate":
+            raise OrganizationInvitationDuplicatePending()
+        if mode == "ambiguous":
+            raise OrganizationInvitationAmbiguous()
+
+        from datetime import datetime, timezone
+
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        self._invitation_seq += 1
+        effective_inviter = inviter_user_id
+        created_ms = now_ms
+        if mode == "ambiguous_applied_other_inviter":
+            effective_inviter = f"user_other_{uuid.uuid4().hex[:8]}"
+        if mode == "ambiguous_applied_stale":
+            created_ms = now_ms - (7 * 24 * 60 * 60 * 1000)
+
+        invitation = ClerkOrganizationInvitationRaw(
+            provider_invitation_id=f"inv_{self._invitation_seq}_{uuid.uuid4().hex[:8]}",
+            email_address=email_address,
+            external_role=role,
+            status="pending",
+            inviter_user_id=effective_inviter,
+            created_at_ms=created_ms,
+            expires_at_ms=now_ms + 30 * 24 * 60 * 60 * 1000,
+        )
+        if mode in {
+            "ambiguous_applied",
+            "ambiguous_applied_other_inviter",
+            "ambiguous_applied_stale",
+        }:
+            self.invitations.setdefault(clerk_org_id, []).append(invitation)
+            raise OrganizationInvitationAmbiguous()
+
+        # Simulate provider uniqueness for pending same email.
+        existing = self.invitations.get(clerk_org_id, [])
+        if any(
+            row.email_address == email_address and row.status == "pending"
+            for row in existing
+        ):
+            raise OrganizationInvitationDuplicatePending()
+        # Simulate already-member when membership email matches a FakeClerk user email.
+        for clerk_user_id, memberships in self.memberships.items():
+            if not any(m.clerk_org_id == clerk_org_id for m in memberships):
+                continue
+            info = self.users.get(clerk_user_id)
+            if info is not None and info.email == email_address:
+                raise OrganizationInvitationAlreadyMember()
+
+        self.invitations.setdefault(clerk_org_id, []).append(invitation)
+        return invitation
 
 
 @pytest.fixture(scope="session")

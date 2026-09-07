@@ -25,6 +25,22 @@ class OrganizationAccessWriteAmbiguous(Exception):
     """Provider write outcome is ambiguous (timeout/5xx/connection after attempt)."""
 
 
+class OrganizationInvitationUnavailable(Exception):
+    """Definite inability to complete an organization-invitation provider operation."""
+
+
+class OrganizationInvitationAmbiguous(Exception):
+    """Invitation create outcome is ambiguous after the write was attempted."""
+
+
+class OrganizationInvitationAlreadyMember(Exception):
+    """Provider rejected create: email already belongs to an org member."""
+
+
+class OrganizationInvitationDuplicatePending(Exception):
+    """Provider rejected create: a pending invitation already exists for the email."""
+
+
 @dataclass(frozen=True)
 class ClerkUserInfo:
     clerk_user_id: str
@@ -58,6 +74,19 @@ class ClerkOrganizationMembershipRaw:
     external_role: str | None
     first_name: str | None
     last_name: str | None
+
+
+@dataclass(frozen=True)
+class ClerkOrganizationInvitationRaw:
+    """Organization invitation row for M40 (internal; never expose provider ids)."""
+
+    provider_invitation_id: str
+    email_address: str
+    external_role: str | None
+    status: str | None
+    inviter_user_id: str | None
+    created_at_ms: int | None
+    expires_at_ms: int | None
 
 
 class ClerkDirectory(Protocol):
@@ -100,6 +129,26 @@ class ClerkDirectory(Protocol):
         clerk_org_id: str,
         clerk_user_id: str,
     ) -> None: ...
+
+    def list_organization_invitations(
+        self,
+        clerk_org_id: str,
+        *,
+        status: str | None = None,
+        email_address: str | None = None,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[ClerkOrganizationInvitationRaw], int | None]: ...
+
+    def create_organization_invitation(
+        self,
+        clerk_org_id: str,
+        *,
+        email_address: str,
+        role: str,
+        inviter_user_id: str,
+        notify: bool = True,
+    ) -> ClerkOrganizationInvitationRaw: ...
 
 
 class HttpClerkDirectory:
@@ -458,6 +507,173 @@ class HttpClerkDirectory:
             first_name=first_name,
             last_name=last_name,
         )
+
+    def list_organization_invitations(
+        self,
+        clerk_org_id: str,
+        *,
+        status: str | None = None,
+        email_address: str | None = None,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[ClerkOrganizationInvitationRaw], int | None]:
+        """List organization invitations (M40).
+
+        Endpoint: GET /organizations/{organization_id}/invitations
+        """
+        if not self._settings.clerk_secret_key:
+            raise OrganizationInvitationUnavailable()
+        if not isinstance(clerk_org_id, str) or not clerk_org_id.strip():
+            raise OrganizationInvitationUnavailable()
+        if limit < 1 or offset < 0:
+            raise OrganizationInvitationUnavailable()
+        params: dict[str, str | int] = {"limit": limit, "offset": offset}
+        if status is not None:
+            params["status"] = status
+        if email_address is not None:
+            params["email_address"] = email_address
+        try:
+            response = self._client.get(
+                f"/organizations/{clerk_org_id}/invitations",
+                params=params,
+            )
+        except (httpx.TimeoutException, httpx.TransportError, httpx.HTTPError) as exc:
+            raise OrganizationInvitationUnavailable() from exc
+        if response.status_code >= 400:
+            raise OrganizationInvitationUnavailable()
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise OrganizationInvitationUnavailable() from exc
+        if not isinstance(payload, dict):
+            raise OrganizationInvitationUnavailable()
+        items = payload.get("data", [])
+        if not isinstance(items, list):
+            raise OrganizationInvitationUnavailable()
+        invitations: list[ClerkOrganizationInvitationRaw] = []
+        for item in items:
+            invitations.append(self._parse_invitation_payload(item))
+        total_raw = payload.get("total_count")
+        total: int | None
+        if isinstance(total_raw, int) and total_raw >= 0:
+            total = total_raw
+        else:
+            total = None
+        return invitations, total
+
+    def create_organization_invitation(
+        self,
+        clerk_org_id: str,
+        *,
+        email_address: str,
+        role: str,
+        inviter_user_id: str,
+        notify: bool = True,
+    ) -> ClerkOrganizationInvitationRaw:
+        """Create organization invitation (M40).
+
+        Endpoint: POST /organizations/{organization_id}/invitations
+        Body includes notify=true explicitly (provider-owned email delivery).
+        """
+        if not self._settings.clerk_secret_key:
+            raise OrganizationInvitationUnavailable()
+        if not isinstance(clerk_org_id, str) or not clerk_org_id.strip():
+            raise OrganizationInvitationUnavailable()
+        if not isinstance(email_address, str) or not email_address.strip():
+            raise OrganizationInvitationUnavailable()
+        if not isinstance(role, str) or not role.strip():
+            raise OrganizationInvitationUnavailable()
+        if not isinstance(inviter_user_id, str) or not inviter_user_id.strip():
+            raise OrganizationInvitationUnavailable()
+        body = {
+            "email_address": email_address,
+            "role": role,
+            "inviter_user_id": inviter_user_id,
+            "notify": bool(notify),
+        }
+        try:
+            response = self._client.post(
+                f"/organizations/{clerk_org_id}/invitations",
+                json=body,
+            )
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            raise OrganizationInvitationAmbiguous() from exc
+        except httpx.HTTPError as exc:
+            raise OrganizationInvitationAmbiguous() from exc
+        if response.status_code >= 500:
+            raise OrganizationInvitationAmbiguous()
+        if response.status_code >= 400:
+            self._raise_invitation_create_error(response)
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise OrganizationInvitationAmbiguous() from exc
+        return self._parse_invitation_payload(payload)
+
+    def _raise_invitation_create_error(self, response: httpx.Response) -> None:
+        """Map only exact documented business codes; everything else → unavailable."""
+        codes: set[str] = set()
+        try:
+            payload = response.json()
+        except ValueError:
+            raise OrganizationInvitationUnavailable() from None
+        if isinstance(payload, dict):
+            errors = payload.get("errors")
+            if isinstance(errors, list):
+                for err in errors:
+                    if isinstance(err, dict):
+                        code = err.get("code")
+                        if isinstance(code, str) and code:
+                            codes.add(code)
+            # Some responses surface a single code at the top level.
+            top = payload.get("code")
+            if isinstance(top, str) and top:
+                codes.add(top)
+        if "already_a_member_in_organization" in codes:
+            raise OrganizationInvitationAlreadyMember()
+        if "organization_invitation_not_unique" in codes or "duplicate_record" in codes:
+            raise OrganizationInvitationDuplicatePending()
+        raise OrganizationInvitationUnavailable()
+
+    @staticmethod
+    def _parse_invitation_payload(payload: object) -> ClerkOrganizationInvitationRaw:
+        if not isinstance(payload, dict):
+            raise OrganizationInvitationUnavailable()
+        invitation_id = payload.get("id")
+        if not isinstance(invitation_id, str) or not invitation_id:
+            raise OrganizationInvitationUnavailable()
+        email_raw = payload.get("email_address")
+        if not isinstance(email_raw, str) or not email_raw:
+            raise OrganizationInvitationUnavailable()
+        role_raw = payload.get("role")
+        external_role = role_raw if isinstance(role_raw, str) else None
+        status_raw = payload.get("status")
+        status_value = status_raw if isinstance(status_raw, str) else None
+        inviter = payload.get("inviter_user_id")
+        if inviter is None:
+            inviter = payload.get("inviter_id")
+        inviter_user_id = inviter if isinstance(inviter, str) and inviter else None
+        created_at_ms = _coerce_unix_ms(payload.get("created_at"))
+        expires_at_ms = _coerce_unix_ms(payload.get("expires_at"))
+        return ClerkOrganizationInvitationRaw(
+            provider_invitation_id=invitation_id,
+            email_address=email_raw,
+            external_role=external_role,
+            status=status_value,
+            inviter_user_id=inviter_user_id,
+            created_at_ms=created_at_ms,
+            expires_at_ms=expires_at_ms,
+        )
+
+
+def _coerce_unix_ms(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    return None
 
 
 def primary_email_info(data: dict) -> tuple[str, bool]:

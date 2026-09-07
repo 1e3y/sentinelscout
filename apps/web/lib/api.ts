@@ -786,7 +786,8 @@ export type OrganizationAuditAction =
   | "report_share_created"
   | "report_share_revoked"
   | "organization_member_role_changed"
-  | "organization_member_removed";
+  | "organization_member_removed"
+  | "organization_invitation_created";
 
 export type OrganizationAuditResourceKind =
   | "target"
@@ -799,7 +800,8 @@ export type OrganizationAuditResourceKind =
   | "report_share"
   | "candidate"
   | "alert"
-  | "organization_member";
+  | "organization_member"
+  | "organization";
 
 export type OrganizationAuditActor = {
   kind: "organization_member" | "system" | "unavailable_user";
@@ -1839,6 +1841,66 @@ export function removeOrganizationMember(
     `/v1/organization-access/members/${userId}`,
     token,
     { method: "DELETE" },
+  );
+}
+
+export type OrganizationInvitationRole = "admin" | "member";
+export type OrganizationInvitationRoleState = "recognized" | "unrecognized";
+export type OrganizationInvitationLocalRecordingState =
+  | "complete"
+  | "audit_degraded";
+
+export type OrganizationInvitation = {
+  status: "pending";
+  role: OrganizationInvitationRole | null;
+  role_state: OrganizationInvitationRoleState;
+  recipient_hint: string;
+  created_at: string;
+  expires_at: string | null;
+};
+
+export type OrganizationInvitationsResponse = {
+  page_size: number;
+  next_cursor: string | null;
+  total_invitations: number | null;
+  items: OrganizationInvitation[];
+};
+
+export type OrganizationInvitationCreated = {
+  status: "pending";
+  role: "member";
+  role_state: "recognized";
+  recipient_hint: string;
+  created_at: string;
+  expires_at: string | null;
+  local_recording_state: OrganizationInvitationLocalRecordingState;
+};
+
+export function fetchOrganizationInvitations(
+  token: string,
+  options: { page_size?: number; cursor?: string | null } = {},
+): Promise<OrganizationInvitationsResponse> {
+  const params = new URLSearchParams();
+  if (options.page_size != null) params.set("page_size", String(options.page_size));
+  if (options.cursor) params.set("cursor", options.cursor);
+  const query = params.toString();
+  return apiFetch<OrganizationInvitationsResponse>(
+    `/v1/organization-invitations${query ? `?${query}` : ""}`,
+    token,
+  );
+}
+
+export function createOrganizationInvitation(
+  token: string,
+  email: string,
+): Promise<OrganizationInvitationCreated> {
+  return apiFetch<OrganizationInvitationCreated>(
+    "/v1/organization-invitations",
+    token,
+    {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    },
   );
 }
 

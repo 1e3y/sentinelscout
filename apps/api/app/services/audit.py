@@ -81,6 +81,7 @@ _AUDIT_METADATA_ALLOWLIST = frozenset(
         "target_user_id",
         "previous_role",
         "new_role",
+        "role",
     }
 )
 

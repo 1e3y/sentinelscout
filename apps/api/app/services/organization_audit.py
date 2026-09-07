@@ -39,6 +39,7 @@ from app.schemas.organization_audit import (
     OrganizationAuditEventsResponse,
     OrganizationAuditResource,
     OrganizationAuditRow,
+    OrganizationInvitationCreatedAuditDetail,
     OrganizationMemberRemovedAuditDetail,
     OrganizationMemberRoleChangedAuditDetail,
     RemediationRecordedAuditDetail,
@@ -370,6 +371,14 @@ _VISIBLE_SPECS: tuple[VisibleActionSpec, ...] = (
         frozenset({"organization_member"}),
         frozenset({"target_user_id", "previous_role"}),
     ),
+    VisibleActionSpec(
+        "organization.invitation_created",
+        "organization_invitation_created",
+        "Organization invitation created",
+        "organization",
+        frozenset({"organization"}),
+        frozenset({"role"}),
+    ),
 )
 
 VISIBLE_INTERNAL_ACTIONS: frozenset[str] = frozenset(
@@ -686,6 +695,10 @@ def _build_detail(
             target_user_id=_parse_uuid(scalars.get("target_user_id")),
             previous_role=scalars.get("previous_role") or None,
         )
+    if action == "organization_invitation_created":
+        return OrganizationInvitationCreatedAuditDetail(
+            role=scalars.get("role") or None,
+        )
     if action == "finding_resolved":
         return None
     return None
@@ -907,6 +920,9 @@ def _enrich_resources(
             label = scalars.get("domain") or UNAVAILABLE_RESOURCE_LABEL
         elif kind == "notification_settings":
             label = "Notification settings"
+            resource_id = organization_id
+        elif kind == "organization":
+            label = "Organization"
             resource_id = organization_id
         elif kind == "finding":
             fid = (
