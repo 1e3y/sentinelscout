@@ -141,6 +141,9 @@ export function AuditPanel({ enabled, isAdmin }: Props) {
             <option value="organization_invitation_created">
               Invitation created
             </option>
+            <option value="organization_invitation_revoked">
+              Invitation revoked
+            </option>
             <option value="alert_acknowledged">Alert acknowledged</option>
           </select>
         </label>

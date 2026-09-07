@@ -1,4 +1,4 @@
-"""Organization invitation DTOs (Milestone 40)."""
+"""Organization invitation DTOs (Milestones 40–41)."""
 
 from __future__ import annotations
 
@@ -27,6 +27,7 @@ class OrganizationInvitationCreated(BaseModel):
     recipient_hint: str
     created_at: datetime
     expires_at: datetime | None = None
+    invitation_ref: str
     local_recording_state: LocalRecordingState = "complete"
 
 
@@ -39,6 +40,7 @@ class OrganizationInvitation(BaseModel):
     recipient_hint: str
     created_at: datetime
     expires_at: datetime | None = None
+    invitation_ref: str
 
 
 class OrganizationInvitationsResponse(BaseModel):
@@ -48,3 +50,16 @@ class OrganizationInvitationsResponse(BaseModel):
     next_cursor: str | None = None
     total_invitations: int | None = None
     items: list[OrganizationInvitation] = Field(default_factory=list)
+
+
+class OrganizationInvitationRevokeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    invitation_ref: str = Field(min_length=1, max_length=2048)
+
+
+class OrganizationInvitationRevoked(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    revoked: Literal[True] = True
+    local_recording_state: LocalRecordingState = "complete"

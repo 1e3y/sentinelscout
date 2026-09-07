@@ -22,19 +22,28 @@ from app.schemas.organization_invitations import (
     LocalRecordingState,
     OrganizationInvitation,
     OrganizationInvitationCreated,
+    OrganizationInvitationRevoked,
     OrganizationInvitationsResponse,
 )
 from app.services.audit import record_audit
 from app.services.authorization import persistable_org_role
 from app.services.clerk import (
     ClerkDirectory,
+    ClerkInvitationMutationView,
     ClerkOrganizationInvitationRaw,
     OrganizationInvitationAlreadyMember,
     OrganizationInvitationAmbiguous,
     OrganizationInvitationDuplicatePending,
+    OrganizationInvitationNotFound,
     OrganizationInvitationUnavailable,
 )
 from app.services.organization_access import classify_provider_role
+from app.services.organization_invitation_refs import (
+    InvitationRefCodecError,
+    invitation_ref_codec_ready,
+    mint_invitation_ref,
+    open_invitation_ref,
+)
 
 logger = logging.getLogger("scout.organization_invitations")
 
@@ -44,12 +53,15 @@ CURSOR_VERSION = "v1"
 INVALID_CURSOR_DETAIL = "Invalid organization invitations cursor"
 CREATE_UNAVAILABLE_DETAIL = "Organization invitation could not be created."
 LIST_UNAVAILABLE_DETAIL = "Organization invitations could not be verified."
+REVOKE_UNAVAILABLE_DETAIL = "Organization invitation could not be revoked."
+PENDING_NOT_FOUND_DETAIL = "Pending invitation not found."
 ALREADY_MEMBER_DETAIL = "This person already has organization access."
 DUPLICATE_PENDING_DETAIL = "An invitation is already pending for this address."
 MAX_EMAIL_LENGTH = 254
 # Provider clock skew tolerance for causal reconcile of ambiguous CREATE.
 CREATE_CLOCK_SKEW = timedelta(seconds=120)
 AUDIT_ACTION = "organization.invitation_created"
+REVOKE_AUDIT_ACTION = "organization.invitation_revoked"
 AUDIT_PERSIST_ATTEMPTS = 3
 
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
@@ -67,6 +79,35 @@ def raise_list_unavailable() -> None:
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         detail=LIST_UNAVAILABLE_DETAIL,
     )
+
+
+def raise_revoke_unavailable() -> None:
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail=REVOKE_UNAVAILABLE_DETAIL,
+    )
+
+
+def raise_pending_not_found() -> None:
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=PENDING_NOT_FOUND_DETAIL,
+    )
+
+
+def require_invitation_ref_codec_ready_for_create() -> None:
+    if not invitation_ref_codec_ready():
+        raise_create_unavailable()
+
+
+def require_invitation_ref_codec_ready_for_list() -> None:
+    if not invitation_ref_codec_ready():
+        raise_list_unavailable()
+
+
+def require_invitation_ref_codec_ready_for_revoke() -> None:
+    if not invitation_ref_codec_ready():
+        raise_pending_not_found()
 
 
 def encode_invitation_cursor(*, offset: int) -> str:
@@ -176,20 +217,34 @@ def _status_is_pending(raw: str | None) -> bool:
     return isinstance(raw, str) and raw.strip().lower() == "pending"
 
 
-def _dto_from_raw(row: ClerkOrganizationInvitationRaw) -> OrganizationInvitation:
+def _dto_from_raw(
+    row: ClerkOrganizationInvitationRaw,
+    *,
+    organization_id: UUID,
+) -> OrganizationInvitation:
     if not _status_is_pending(row.status):
         raise_list_unavailable()
     created_at = _ms_to_dt(row.created_at_ms)
     if created_at is None:
         raise_list_unavailable()
     role, role_state = classify_provider_role(row.external_role)
+    expires_at = _ms_to_dt(row.expires_at_ms)
+    try:
+        invitation_ref = mint_invitation_ref(
+            organization_id=organization_id,
+            provider_invitation_id=row.provider_invitation_id,
+            provider_expires_at=expires_at,
+        )
+    except InvitationRefCodecError:
+        raise_list_unavailable()
     return OrganizationInvitation(
         status="pending",
         role=role,
         role_state=role_state,
         recipient_hint=recipient_hint(row.email_address),
         created_at=created_at,
-        expires_at=_ms_to_dt(row.expires_at_ms),
+        expires_at=expires_at,
+        invitation_ref=invitation_ref,
     )
 
 
@@ -198,6 +253,9 @@ def _persist_audit_with_retry(
     *,
     organization_id: UUID,
     actor_user_id: UUID,
+    action: str,
+    summary: str,
+    metadata: dict | None,
 ) -> bool:
     for _attempt in range(AUDIT_PERSIST_ATTEMPTS):
         try:
@@ -206,11 +264,11 @@ def _persist_audit_with_retry(
                 organization_id=organization_id,
                 actor_type="user",
                 actor_user_id=actor_user_id,
-                action=AUDIT_ACTION,
+                action=action,
                 resource_type="organization",
                 resource_id=organization_id,
-                summary="Organization invitation created",
-                metadata={"role": "member"},
+                summary=summary,
+                metadata=metadata,
                 commit=True,
             )
             return True
@@ -222,13 +280,18 @@ def _persist_audit_with_retry(
     return False
 
 
-def _emit_audit_degraded(*, organization_id: UUID, actor_user_id: UUID) -> None:
+def _emit_audit_degraded(
+    *,
+    organization_id: UUID,
+    actor_user_id: UUID,
+    mutation_type: str,
+) -> None:
     logger.error(
         "organization_invitation_audit_degraded",
         extra={
             "organization_app_id": str(organization_id),
             "actor_user_id": str(actor_user_id),
-            "mutation_type": "invitation_create",
+            "mutation_type": mutation_type,
         },
     )
 
@@ -293,6 +356,9 @@ def create_organization_invitation(
     actor_clerk_user_id: str,
     email_raw: str,
 ) -> OrganizationInvitationCreated:
+    # Codec readiness before any provider I/O (no invite email on misconfig).
+    require_invitation_ref_codec_ready_for_create()
+
     if not organization.clerk_org_id or not organization.clerk_org_id.strip():
         raise_create_unavailable()
     if not actor_clerk_user_id or not actor_clerk_user_id.strip():
@@ -362,10 +428,24 @@ def create_organization_invitation(
     if created_at is None:
         raise_create_unavailable()
 
+    expires_at = _ms_to_dt(created.expires_at_ms)
+    try:
+        invitation_ref = mint_invitation_ref(
+            organization_id=organization.id,
+            provider_invitation_id=created.provider_invitation_id,
+            provider_expires_at=expires_at,
+        )
+    except InvitationRefCodecError:
+        # Should be unreachable after readiness check; fail closed without leaking.
+        raise_create_unavailable()
+
     audit_ok = _persist_audit_with_retry(
         db,
         organization_id=organization.id,
         actor_user_id=actor_user_id,
+        action=AUDIT_ACTION,
+        summary="Organization invitation created",
+        metadata={"role": "member"},
     )
     recording: LocalRecordingState = "complete"
     if not audit_ok:
@@ -373,6 +453,7 @@ def create_organization_invitation(
         _emit_audit_degraded(
             organization_id=organization.id,
             actor_user_id=actor_user_id,
+            mutation_type="invitation_create",
         )
 
     return OrganizationInvitationCreated(
@@ -381,7 +462,8 @@ def create_organization_invitation(
         role_state="recognized",
         recipient_hint=recipient_hint(canonical),
         created_at=created_at,
-        expires_at=_ms_to_dt(created.expires_at_ms),
+        expires_at=expires_at,
+        invitation_ref=invitation_ref,
         local_recording_state=recording,
     )
 
@@ -393,6 +475,8 @@ def list_pending_organization_invitations(
     page_size: int = DEFAULT_PAGE_SIZE,
     cursor: str | None = None,
 ) -> OrganizationInvitationsResponse:
+    require_invitation_ref_codec_ready_for_list()
+
     if not organization.clerk_org_id or not organization.clerk_org_id.strip():
         raise_list_unavailable()
 
@@ -414,7 +498,7 @@ def list_pending_organization_invitations(
     items: list[OrganizationInvitation] = []
     for row in rows:
         # Correction 2: contradictory/malformed pending rows fail the page.
-        items.append(_dto_from_raw(row))
+        items.append(_dto_from_raw(row, organization_id=organization.id))
 
     next_offset = offset + len(rows)
     if total is not None:
@@ -431,4 +515,145 @@ def list_pending_organization_invitations(
         next_cursor=next_cursor,
         total_invitations=total,
         items=items,
+    )
+
+
+def _status_norm(raw: str | None) -> str | None:
+    if not isinstance(raw, str):
+        return None
+    value = raw.strip().lower()
+    return value or None
+
+
+def _require_pending_mutation_view(view: ClerkInvitationMutationView) -> None:
+    status_value = _status_norm(view.status)
+    if status_value == "pending":
+        return
+    # accepted / revoked / expired / unknown non-pending → uniform miss
+    raise_pending_not_found()
+
+
+def _reconcile_revoke_after_ambiguous(
+    directory: ClerkDirectory,
+    *,
+    clerk_org_id: str,
+    provider_invitation_id: str,
+) -> ClerkInvitationMutationView:
+    try:
+        view = directory.get_organization_invitation(clerk_org_id, provider_invitation_id)
+    except OrganizationInvitationNotFound:
+        # Clerk normally preserves revoked records; absence after write is ambiguous.
+        raise_revoke_unavailable()
+    except OrganizationInvitationUnavailable:
+        raise_revoke_unavailable()
+    except Exception:
+        raise_revoke_unavailable()
+
+    status_value = _status_norm(view.status)
+    if status_value == "revoked":
+        return view
+    if status_value == "pending":
+        raise_revoke_unavailable()
+    if status_value in {"accepted", "expired"}:
+        raise_pending_not_found()
+    raise_revoke_unavailable()
+
+
+def revoke_organization_invitation(
+    db: Session,
+    *,
+    organization: Organization,
+    directory: ClerkDirectory,
+    actor_user_id: UUID,
+    actor_clerk_user_id: str,
+    invitation_ref: str,
+) -> OrganizationInvitationRevoked:
+    """Revoke one pending provider invitation via opaque invitation_ref (M41)."""
+    require_invitation_ref_codec_ready_for_revoke()
+
+    if not organization.clerk_org_id or not organization.clerk_org_id.strip():
+        raise_revoke_unavailable()
+    if not actor_clerk_user_id or not actor_clerk_user_id.strip():
+        raise_revoke_unavailable()
+
+    try:
+        payload = open_invitation_ref(
+            invitation_ref,
+            expected_organization_id=organization.id,
+        )
+    except InvitationRefCodecError:
+        raise_pending_not_found()
+
+    provider_invitation_id = payload.provider_invitation_id
+
+    # 1) Authoritative pending precheck (exact GET; email-blind).
+    try:
+        current = directory.get_organization_invitation(
+            organization.clerk_org_id,
+            provider_invitation_id,
+        )
+    except OrganizationInvitationNotFound:
+        raise_pending_not_found()
+    except OrganizationInvitationUnavailable:
+        raise_revoke_unavailable()
+    except Exception:
+        raise_revoke_unavailable()
+
+    _require_pending_mutation_view(current)
+    role, role_state = classify_provider_role(current.external_role)
+    audit_metadata: dict | None = None
+    if role_state == "recognized" and role is not None:
+        audit_metadata = {"role": role}
+
+    # 2) Provider revoke write (at most once).
+    revoked_view: ClerkInvitationMutationView | None = None
+    try:
+        revoked_view = directory.revoke_organization_invitation(
+            organization.clerk_org_id,
+            provider_invitation_id,
+            requesting_user_id=actor_clerk_user_id,
+        )
+    except OrganizationInvitationAmbiguous:
+        revoked_view = _reconcile_revoke_after_ambiguous(
+            directory,
+            clerk_org_id=organization.clerk_org_id,
+            provider_invitation_id=provider_invitation_id,
+        )
+    except OrganizationInvitationUnavailable:
+        raise_revoke_unavailable()
+    except OrganizationInvitationNotFound:
+        raise_pending_not_found()
+    except Exception:
+        raise_revoke_unavailable()
+
+    assert revoked_view is not None
+    if _status_norm(revoked_view.status) != "revoked":
+        # Exact non-revoked success body: treat non-pending as miss, else unavailable.
+        status_value = _status_norm(revoked_view.status)
+        if status_value in {"accepted", "expired", "pending"}:
+            if status_value == "pending":
+                raise_revoke_unavailable()
+            raise_pending_not_found()
+        raise_revoke_unavailable()
+
+    audit_ok = _persist_audit_with_retry(
+        db,
+        organization_id=organization.id,
+        actor_user_id=actor_user_id,
+        action=REVOKE_AUDIT_ACTION,
+        summary="Organization invitation revoked",
+        metadata=audit_metadata,
+    )
+    recording: LocalRecordingState = "complete"
+    if not audit_ok:
+        recording = "audit_degraded"
+        _emit_audit_degraded(
+            organization_id=organization.id,
+            actor_user_id=actor_user_id,
+            mutation_type="invitation_revoke",
+        )
+
+    return OrganizationInvitationRevoked(
+        revoked=True,
+        local_recording_state=recording,
     )

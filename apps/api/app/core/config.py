@@ -110,6 +110,9 @@ class Settings(BaseSettings):
     rate_limit_organization_invitation_read: int = Field(
         default=60, alias="RATE_LIMIT_ORGANIZATION_INVITATION_READ"
     )
+    rate_limit_organization_invitation_revoke: int = Field(
+        default=20, alias="RATE_LIMIT_ORGANIZATION_INVITATION_REVOKE"
+    )
     rate_limit_window_seconds: int = Field(default=3600, alias="RATE_LIMIT_WINDOW_SECONDS")
 
     email_delivery_enabled: bool = Field(default=False, alias="EMAIL_DELIVERY_ENABLED")
@@ -131,6 +134,14 @@ class Settings(BaseSettings):
     report_delivery_secret_key: str = Field(default="", alias="REPORT_DELIVERY_SECRET_KEY")
     report_delivery_secret_key_version: str = Field(
         default="v1", alias="REPORT_DELIVERY_SECRET_KEY_VERSION"
+    )
+    # Milestone 41: dedicated AES-256-GCM key for opaque invitation_ref tokens.
+    # 32-byte key as 64 hex chars. Do not reuse REPORT_DELIVERY_SECRET_KEY.
+    # Token format version is wire prefix ``v1`` only — no fake key-version ring.
+    # All API replicas must share the same key before M41 release; rotating the
+    # active key invalidates outstanding refs (admins refresh the pending list).
+    organization_invitation_ref_secret_key: str = Field(
+        default="", alias="ORGANIZATION_INVITATION_REF_SECRET_KEY"
     )
 
     @field_validator("environment", mode="before")
@@ -216,6 +227,15 @@ class Settings(BaseSettings):
                 )
             if "localhost" in self.frontend_url.lower() or "127.0.0.1" in self.frontend_url:
                 missing.append("FRONTEND_URL (must not be localhost in staging/production)")
+            # M41 invitation_ref codec: require a usable dedicated AES-256-GCM key
+            # so create/list/revoke cannot partially succeed across replicas.
+            from app.services.organization_invitation_refs import parse_invitation_ref_key
+
+            if parse_invitation_ref_key(self.organization_invitation_ref_secret_key) is None:
+                missing.append(
+                    "ORGANIZATION_INVITATION_REF_SECRET_KEY "
+                    "(64 hex chars / 32-byte AES-256-GCM key; same on every API replica)"
+                )
             if missing:
                 raise ValueError(
                     "Invalid staging/production settings: " + "; ".join(missing)

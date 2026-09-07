@@ -40,6 +40,7 @@ from app.schemas.organization_audit import (
     OrganizationAuditResource,
     OrganizationAuditRow,
     OrganizationInvitationCreatedAuditDetail,
+    OrganizationInvitationRevokedAuditDetail,
     OrganizationMemberRemovedAuditDetail,
     OrganizationMemberRoleChangedAuditDetail,
     RemediationRecordedAuditDetail,
@@ -379,6 +380,14 @@ _VISIBLE_SPECS: tuple[VisibleActionSpec, ...] = (
         frozenset({"organization"}),
         frozenset({"role"}),
     ),
+    VisibleActionSpec(
+        "organization.invitation_revoked",
+        "organization_invitation_revoked",
+        "Organization invitation revoked",
+        "organization",
+        frozenset({"organization"}),
+        frozenset({"role"}),
+    ),
 )
 
 VISIBLE_INTERNAL_ACTIONS: frozenset[str] = frozenset(
@@ -697,6 +706,10 @@ def _build_detail(
         )
     if action == "organization_invitation_created":
         return OrganizationInvitationCreatedAuditDetail(
+            role=scalars.get("role") or None,
+        )
+    if action == "organization_invitation_revoked":
+        return OrganizationInvitationRevokedAuditDetail(
             role=scalars.get("role") or None,
         )
     if action == "finding_resolved":

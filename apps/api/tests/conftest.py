@@ -31,12 +31,17 @@ os.environ.setdefault(
     "REPORT_DELIVERY_SECRET_KEY",
     "aa" * 32,
 )
+os.environ.setdefault(
+    "ORGANIZATION_INVITATION_REF_SECRET_KEY",
+    "bb" * 32,
+)
 
 from app.core.config import get_settings, reset_settings_cache
 from app.core.db import Base, get_db
 from app.core.security import StaticKeyTokenVerifier
 from app.main import create_app
 from app.services.clerk import (
+    ClerkInvitationMutationView,
     ClerkMembershipNotFound,
     ClerkOrgMembership,
     ClerkOrganizationInvitationRaw,
@@ -49,6 +54,7 @@ from app.services.clerk import (
     OrganizationInvitationAlreadyMember,
     OrganizationInvitationAmbiguous,
     OrganizationInvitationDuplicatePending,
+    OrganizationInvitationNotFound,
     OrganizationInvitationUnavailable,
 )
 from app.services.dns import StaticDnsTxtResolver
@@ -72,6 +78,11 @@ class FakeClerkDirectory:
     # "ambiguous_applied_other_inviter" | "ambiguous_applied_stale" |
     # "already_member" | "duplicate"
     create_invitation_mode: str | None = None
+    # None | "unavailable" | "ambiguous" | "ambiguous_applied" |
+    # "ambiguous_applied_accepted" | "ambiguous_applied_pending" |
+    # "ambiguous_applied_expired" | "ambiguous_applied_absent"
+    revoke_invitation_mode: str | None = None
+    fail_get_invitation: bool = False
     # None | "unavailable" | "ambiguous" | "ambiguous_applied"
     update_role_mode: str | None = None
     # None | "unavailable" | "ambiguous" | "ambiguous_applied"
@@ -84,6 +95,8 @@ class FakeClerkDirectory:
     delete_membership_calls: int = 0
     list_invitations_calls: int = 0
     create_invitation_calls: int = 0
+    get_invitation_calls: int = 0
+    revoke_invitation_calls: int = 0
     _invitation_seq: int = 0
 
     def get_user(self, clerk_user_id: str) -> ClerkUserInfo:
@@ -382,6 +395,140 @@ class FakeClerkDirectory:
 
         self.invitations.setdefault(clerk_org_id, []).append(invitation)
         return invitation
+
+    def _find_invitation(
+        self,
+        clerk_org_id: str,
+        invitation_id: str,
+    ) -> ClerkOrganizationInvitationRaw | None:
+        for row in self.invitations.get(clerk_org_id, []):
+            if row.provider_invitation_id == invitation_id:
+                return row
+        return None
+
+    @staticmethod
+    def _mutation_view(row: ClerkOrganizationInvitationRaw) -> ClerkInvitationMutationView:
+        return ClerkInvitationMutationView(
+            provider_invitation_id=row.provider_invitation_id,
+            status=row.status,
+            external_role=row.external_role,
+        )
+
+    def get_organization_invitation(
+        self,
+        clerk_org_id: str,
+        invitation_id: str,
+    ) -> ClerkInvitationMutationView:
+        self.get_invitation_calls += 1
+        if self.fail_get_invitation:
+            raise OrganizationInvitationUnavailable()
+        row = self._find_invitation(clerk_org_id, invitation_id)
+        if row is None:
+            raise OrganizationInvitationNotFound()
+        return self._mutation_view(row)
+
+    def revoke_organization_invitation(
+        self,
+        clerk_org_id: str,
+        invitation_id: str,
+        *,
+        requesting_user_id: str,
+    ) -> ClerkInvitationMutationView:
+        self.revoke_invitation_calls += 1
+        assert isinstance(requesting_user_id, str) and requesting_user_id.strip()
+        mode = self.revoke_invitation_mode
+        if mode == "unavailable":
+            raise OrganizationInvitationUnavailable()
+        if mode == "ambiguous":
+            raise OrganizationInvitationAmbiguous()
+        if mode == "ambiguous_applied":
+            row = self._find_invitation(clerk_org_id, invitation_id)
+            if row is None:
+                raise OrganizationInvitationNotFound()
+            revoked = ClerkOrganizationInvitationRaw(
+                provider_invitation_id=row.provider_invitation_id,
+                email_address=row.email_address,
+                external_role=row.external_role,
+                status="revoked",
+                inviter_user_id=row.inviter_user_id,
+                created_at_ms=row.created_at_ms,
+                expires_at_ms=row.expires_at_ms,
+            )
+            rows = self.invitations.get(clerk_org_id, [])
+            for index, existing in enumerate(rows):
+                if existing.provider_invitation_id == invitation_id:
+                    rows[index] = revoked
+                    break
+            raise OrganizationInvitationAmbiguous()
+        if mode == "ambiguous_applied_accepted":
+            row = self._find_invitation(clerk_org_id, invitation_id)
+            if row is None:
+                raise OrganizationInvitationNotFound()
+            accepted = ClerkOrganizationInvitationRaw(
+                provider_invitation_id=row.provider_invitation_id,
+                email_address=row.email_address,
+                external_role=row.external_role,
+                status="accepted",
+                inviter_user_id=row.inviter_user_id,
+                created_at_ms=row.created_at_ms,
+                expires_at_ms=row.expires_at_ms,
+            )
+            rows = self.invitations.get(clerk_org_id, [])
+            for index, existing in enumerate(rows):
+                if existing.provider_invitation_id == invitation_id:
+                    rows[index] = accepted
+                    break
+            raise OrganizationInvitationAmbiguous()
+        if mode == "ambiguous_applied_pending":
+            raise OrganizationInvitationAmbiguous()
+        if mode == "ambiguous_applied_expired":
+            row = self._find_invitation(clerk_org_id, invitation_id)
+            if row is None:
+                raise OrganizationInvitationNotFound()
+            expired = ClerkOrganizationInvitationRaw(
+                provider_invitation_id=row.provider_invitation_id,
+                email_address=row.email_address,
+                external_role=row.external_role,
+                status="expired",
+                inviter_user_id=row.inviter_user_id,
+                created_at_ms=row.created_at_ms,
+                expires_at_ms=row.expires_at_ms,
+            )
+            rows = self.invitations.get(clerk_org_id, [])
+            for index, existing in enumerate(rows):
+                if existing.provider_invitation_id == invitation_id:
+                    rows[index] = expired
+                    break
+            raise OrganizationInvitationAmbiguous()
+        if mode == "ambiguous_applied_absent":
+            rows = self.invitations.get(clerk_org_id, [])
+            self.invitations[clerk_org_id] = [
+                row for row in rows if row.provider_invitation_id != invitation_id
+            ]
+            raise OrganizationInvitationAmbiguous()
+
+        row = self._find_invitation(clerk_org_id, invitation_id)
+        if row is None:
+            raise OrganizationInvitationNotFound()
+        if row.status != "pending":
+            # Simulate provider rejecting non-pending revoke as unavailable;
+            # service precheck should normally prevent this path.
+            raise OrganizationInvitationUnavailable()
+        revoked = ClerkOrganizationInvitationRaw(
+            provider_invitation_id=row.provider_invitation_id,
+            email_address=row.email_address,
+            external_role=row.external_role,
+            status="revoked",
+            inviter_user_id=row.inviter_user_id,
+            created_at_ms=row.created_at_ms,
+            expires_at_ms=row.expires_at_ms,
+        )
+        rows = self.invitations.get(clerk_org_id, [])
+        for index, existing in enumerate(rows):
+            if existing.provider_invitation_id == invitation_id:
+                rows[index] = revoked
+                break
+        return self._mutation_view(revoked)
 
 
 @pytest.fixture(scope="session")

@@ -134,6 +134,9 @@ def test_admin_invites_member_only(
     assert body["local_recording_state"] == "complete"
     assert "@" in body["recipient_hint"]
     assert "New.Person@Example.COM" not in response.text
+    assert isinstance(body["invitation_ref"], str) and body["invitation_ref"].startswith(
+        "v1."
+    )
 
     # preflight list + create
     assert fake_clerk.list_invitations_calls == lists_before + 1
@@ -142,6 +145,9 @@ def test_admin_invites_member_only(
     assert stored.email_address == "New.Person@example.com"
     assert stored.external_role == "org:member"
     assert stored.inviter_user_id == ctx["clerk_admin"]
+    assert stored.provider_invitation_id not in body["invitation_ref"]
+    assert str(ctx["org_id"]) not in body["invitation_ref"]
+    assert stored.provider_invitation_id not in response.text
 
     assert db_session.scalar(select(func.count()).select_from(User)) == users_before
     assert (
@@ -363,8 +369,61 @@ def test_list_role_truth_and_unknown(
     assert by_hint["b***@example.com"]["role_state"] == "unrecognized"
     assert "accepted@example.com" not in response.text
     assert all(item["status"] == "pending" for item in body["items"])
+    assert all(
+        isinstance(item["invitation_ref"], str) and item["invitation_ref"].startswith("v1.")
+        for item in body["items"]
+    )
     # accepted filtered by provider status=pending
     assert len(body["items"]) == 3
+
+
+def test_create_missing_ref_key_503_zero_provider(
+    client, make_token, seed_user_a, fake_clerk, monkeypatch
+):
+    ctx = _setup(client, make_token, seed_user_a, fake_clerk)
+    monkeypatch.setenv("ORGANIZATION_INVITATION_REF_SECRET_KEY", "")
+    reset_settings_cache()
+    before_list = fake_clerk.list_invitations_calls
+    before_create = fake_clerk.create_invitation_calls
+    response = _invite(client, ctx["token"], "missing-key@example.com")
+    assert response.status_code == 503
+    assert response.json()["error"]["message"] == CREATE_UNAVAILABLE_DETAIL
+    assert fake_clerk.list_invitations_calls == before_list
+    assert fake_clerk.create_invitation_calls == before_create
+    reset_settings_cache()
+
+
+def test_create_malformed_ref_key_503_zero_provider(
+    client, make_token, seed_user_a, fake_clerk, monkeypatch
+):
+    ctx = _setup(client, make_token, seed_user_a, fake_clerk)
+    monkeypatch.setenv("ORGANIZATION_INVITATION_REF_SECRET_KEY", "not-hex-key")
+    reset_settings_cache()
+    before_list = fake_clerk.list_invitations_calls
+    before_create = fake_clerk.create_invitation_calls
+    response = _invite(client, ctx["token"], "bad-key@example.com")
+    assert response.status_code == 503
+    assert response.json()["error"]["message"] == CREATE_UNAVAILABLE_DETAIL
+    assert fake_clerk.list_invitations_calls == before_list
+    assert fake_clerk.create_invitation_calls == before_create
+    reset_settings_cache()
+
+
+def test_list_missing_ref_key_503_zero_provider(
+    client, make_token, seed_user_a, fake_clerk, monkeypatch
+):
+    ctx = _setup(client, make_token, seed_user_a, fake_clerk)
+    _plant_pending(
+        fake_clerk, clerk_org=ctx["clerk_org"], email="listed@example.com", role="org:member"
+    )
+    monkeypatch.setenv("ORGANIZATION_INVITATION_REF_SECRET_KEY", "")
+    reset_settings_cache()
+    before_list = fake_clerk.list_invitations_calls
+    response = _list(client, ctx["token"])
+    assert response.status_code == 503
+    assert response.json()["error"]["message"] == LIST_UNAVAILABLE_DETAIL
+    assert fake_clerk.list_invitations_calls == before_list
+    reset_settings_cache()
 
 
 def test_list_contradictory_status_503(client, make_token, seed_user_a, fake_clerk):

@@ -787,7 +787,8 @@ export type OrganizationAuditAction =
   | "report_share_revoked"
   | "organization_member_role_changed"
   | "organization_member_removed"
-  | "organization_invitation_created";
+  | "organization_invitation_created"
+  | "organization_invitation_revoked";
 
 export type OrganizationAuditResourceKind =
   | "target"
@@ -1857,6 +1858,7 @@ export type OrganizationInvitation = {
   recipient_hint: string;
   created_at: string;
   expires_at: string | null;
+  invitation_ref: string;
 };
 
 export type OrganizationInvitationsResponse = {
@@ -1873,6 +1875,12 @@ export type OrganizationInvitationCreated = {
   recipient_hint: string;
   created_at: string;
   expires_at: string | null;
+  invitation_ref: string;
+  local_recording_state: OrganizationInvitationLocalRecordingState;
+};
+
+export type OrganizationInvitationRevoked = {
+  revoked: true;
   local_recording_state: OrganizationInvitationLocalRecordingState;
 };
 
@@ -1900,6 +1908,20 @@ export function createOrganizationInvitation(
     {
       method: "POST",
       body: JSON.stringify({ email }),
+    },
+  );
+}
+
+export function revokeOrganizationInvitation(
+  token: string,
+  invitationRef: string,
+): Promise<OrganizationInvitationRevoked> {
+  return apiFetch<OrganizationInvitationRevoked>(
+    "/v1/organization-invitations/revoke",
+    token,
+    {
+      method: "POST",
+      body: JSON.stringify({ invitation_ref: invitationRef }),
     },
   );
 }

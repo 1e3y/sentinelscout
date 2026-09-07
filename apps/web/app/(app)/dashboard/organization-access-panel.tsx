@@ -7,6 +7,7 @@ import {
   fetchOrganizationAccess,
   fetchOrganizationInvitations,
   removeOrganizationMember,
+  revokeOrganizationInvitation,
   updateOrganizationMemberRole,
   type OrganizationAccessMember,
   type OrganizationAccessResponse,
@@ -88,6 +89,7 @@ export function OrganizationAccessPanel({
   const [mutatingUserId, setMutatingUserId] = useState<string | null>(null);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviting, setInviting] = useState(false);
+  const [revokingRef, setRevokingRef] = useState<string | null>(null);
 
   function loadMembers(nextCursor: string | null = null) {
     if (!enabled || !isAdmin) return;
@@ -265,6 +267,48 @@ export function OrganizationAccessPanel({
     } finally {
       setInviting(false);
     }
+  }
+
+  function onRevokeInvite(invite: OrganizationInvitation) {
+    if (revokingRef || pending || inviting) return;
+    if (
+      !window.confirm(
+        `Revoke the pending invitation for ${invite.recipient_hint}? They will no longer be able to join with this invitation.`,
+      )
+    ) {
+      return;
+    }
+    startTransition(async () => {
+      setInviteError(null);
+      setNotice(null);
+      setRevokingRef(invite.invitation_ref);
+      try {
+        const token = await getToken();
+        if (!token) {
+          setInviteError("Missing session token");
+          return;
+        }
+        const result = await revokeOrganizationInvitation(
+          token,
+          invite.invitation_ref,
+        );
+        if (result.local_recording_state === "audit_degraded") {
+          setNotice(
+            "Invitation was revoked, but local activity recording is temporarily incomplete.",
+          );
+        }
+        loadInvites(null);
+      } catch (err) {
+        setInviteError(
+          err instanceof Error
+            ? err.message
+            : "Organization invitation could not be revoked.",
+        );
+        loadInvites(null);
+      } finally {
+        setRevokingRef(null);
+      }
+    });
   }
 
   if (!enabled) return null;
@@ -472,8 +516,8 @@ export function OrganizationAccessPanel({
             ) : (
               invites.items.map((invite, index) => (
                 <li
-                  key={`${invite.recipient_hint}-${invite.created_at}-${index}`}
-                  className="space-y-1 px-3 py-3 text-sm"
+                  key={invite.invitation_ref || `${invite.recipient_hint}-${index}`}
+                  className="space-y-2 px-3 py-3 text-sm"
                 >
                   <div className="font-medium text-zinc-900">
                     {invite.recipient_hint}
@@ -486,6 +530,23 @@ export function OrganizationAccessPanel({
                     {invite.expires_at
                       ? ` · Expires ${formatWhen(invite.expires_at)}`
                       : ""}
+                  </div>
+                  <div>
+                    <button
+                      type="button"
+                      className="rounded border border-zinc-300 px-2 py-1 text-xs disabled:opacity-50"
+                      disabled={
+                        pending ||
+                        inviting ||
+                        (revokingRef != null &&
+                          revokingRef === invite.invitation_ref)
+                      }
+                      onClick={() => onRevokeInvite(invite)}
+                    >
+                      {revokingRef === invite.invitation_ref
+                        ? "Revoking…"
+                        : "Revoke invitation"}
+                    </button>
                   </div>
                 </li>
               ))

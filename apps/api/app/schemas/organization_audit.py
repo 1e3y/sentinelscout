@@ -37,6 +37,7 @@ CustomerAuditAction = Literal[
     "organization_member_role_changed",
     "organization_member_removed",
     "organization_invitation_created",
+    "organization_invitation_revoked",
 ]
 
 CustomerAuditResourceKind = Literal[
@@ -212,6 +213,13 @@ class OrganizationInvitationCreatedAuditDetail(BaseModel):
     role: str | None = None
 
 
+class OrganizationInvitationRevokedAuditDetail(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["organization_invitation_revoked"] = "organization_invitation_revoked"
+    role: str | None = None
+
+
 OrganizationAuditDetail = Annotated[
     TargetAuditDetail
     | AssessmentAuditDetail
@@ -228,7 +236,8 @@ OrganizationAuditDetail = Annotated[
     | ReportShareAuditDetail
     | OrganizationMemberRoleChangedAuditDetail
     | OrganizationMemberRemovedAuditDetail
-    | OrganizationInvitationCreatedAuditDetail,
+    | OrganizationInvitationCreatedAuditDetail
+    | OrganizationInvitationRevokedAuditDetail,
     Field(discriminator="kind"),
 ]
 

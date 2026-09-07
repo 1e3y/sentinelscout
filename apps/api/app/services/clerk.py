@@ -41,6 +41,10 @@ class OrganizationInvitationDuplicatePending(Exception):
     """Provider rejected create: a pending invitation already exists for the email."""
 
 
+class OrganizationInvitationNotFound(Exception):
+    """Exact organization invitation was not found under the Clerk org."""
+
+
 @dataclass(frozen=True)
 class ClerkUserInfo:
     clerk_user_id: str
@@ -87,6 +91,19 @@ class ClerkOrganizationInvitationRaw:
     inviter_user_id: str | None
     created_at_ms: int | None
     expires_at_ms: int | None
+
+
+@dataclass(frozen=True)
+class ClerkInvitationMutationView:
+    """Email-blind invitation view for M41 revoke verify/reconcile.
+
+    Provider GET/revoke payloads may include email and other fields; the adapter
+    projects only these fields before returning to service code.
+    """
+
+    provider_invitation_id: str
+    status: str | None
+    external_role: str | None
 
 
 class ClerkDirectory(Protocol):
@@ -149,6 +166,20 @@ class ClerkDirectory(Protocol):
         inviter_user_id: str,
         notify: bool = True,
     ) -> ClerkOrganizationInvitationRaw: ...
+
+    def get_organization_invitation(
+        self,
+        clerk_org_id: str,
+        invitation_id: str,
+    ) -> ClerkInvitationMutationView: ...
+
+    def revoke_organization_invitation(
+        self,
+        clerk_org_id: str,
+        invitation_id: str,
+        *,
+        requesting_user_id: str,
+    ) -> ClerkInvitationMutationView: ...
 
 
 class HttpClerkDirectory:
@@ -663,6 +694,98 @@ class HttpClerkDirectory:
             inviter_user_id=inviter_user_id,
             created_at_ms=created_at_ms,
             expires_at_ms=expires_at_ms,
+        )
+
+    def get_organization_invitation(
+        self,
+        clerk_org_id: str,
+        invitation_id: str,
+    ) -> ClerkInvitationMutationView:
+        """Fetch one organization invitation (M41 verify/reconcile).
+
+        Endpoint: GET /organizations/{organization_id}/invitations/{invitation_id}
+        """
+        if not self._settings.clerk_secret_key:
+            raise OrganizationInvitationUnavailable()
+        if not isinstance(clerk_org_id, str) or not clerk_org_id.strip():
+            raise OrganizationInvitationUnavailable()
+        if not isinstance(invitation_id, str) or not invitation_id.strip():
+            raise OrganizationInvitationUnavailable()
+        try:
+            response = self._client.get(
+                f"/organizations/{clerk_org_id}/invitations/{invitation_id}",
+            )
+        except (httpx.TimeoutException, httpx.TransportError, httpx.HTTPError) as exc:
+            raise OrganizationInvitationUnavailable() from exc
+        if response.status_code == 404:
+            raise OrganizationInvitationNotFound()
+        if response.status_code >= 400:
+            raise OrganizationInvitationUnavailable()
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise OrganizationInvitationUnavailable() from exc
+        return self._parse_invitation_mutation_view(payload)
+
+    def revoke_organization_invitation(
+        self,
+        clerk_org_id: str,
+        invitation_id: str,
+        *,
+        requesting_user_id: str,
+    ) -> ClerkInvitationMutationView:
+        """Revoke one organization invitation (M41).
+
+        Endpoint: POST /organizations/{organization_id}/invitations/{invitation_id}/revoke
+        Body: requesting_user_id (current actor Clerk user id).
+        """
+        if not self._settings.clerk_secret_key:
+            raise OrganizationInvitationUnavailable()
+        if not isinstance(clerk_org_id, str) or not clerk_org_id.strip():
+            raise OrganizationInvitationUnavailable()
+        if not isinstance(invitation_id, str) or not invitation_id.strip():
+            raise OrganizationInvitationUnavailable()
+        if not isinstance(requesting_user_id, str) or not requesting_user_id.strip():
+            raise OrganizationInvitationUnavailable()
+        body = {"requesting_user_id": requesting_user_id}
+        try:
+            response = self._client.post(
+                f"/organizations/{clerk_org_id}/invitations/{invitation_id}/revoke",
+                json=body,
+            )
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            raise OrganizationInvitationAmbiguous() from exc
+        except httpx.HTTPError as exc:
+            raise OrganizationInvitationAmbiguous() from exc
+        if response.status_code >= 500:
+            raise OrganizationInvitationAmbiguous()
+        # Unexpected absence after a successful pending precheck → reconcile once.
+        if response.status_code == 404:
+            raise OrganizationInvitationAmbiguous()
+        if response.status_code >= 400:
+            raise OrganizationInvitationUnavailable()
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise OrganizationInvitationAmbiguous() from exc
+        return self._parse_invitation_mutation_view(payload)
+
+    @staticmethod
+    def _parse_invitation_mutation_view(payload: object) -> ClerkInvitationMutationView:
+        """Project provider invitation payload to an email-blind mutation view."""
+        if not isinstance(payload, dict):
+            raise OrganizationInvitationUnavailable()
+        invitation_id = payload.get("id")
+        if not isinstance(invitation_id, str) or not invitation_id:
+            raise OrganizationInvitationUnavailable()
+        role_raw = payload.get("role")
+        external_role = role_raw if isinstance(role_raw, str) else None
+        status_raw = payload.get("status")
+        status_value = status_raw if isinstance(status_raw, str) else None
+        return ClerkInvitationMutationView(
+            provider_invitation_id=invitation_id,
+            status=status_value,
+            external_role=external_role,
         )
 
 
