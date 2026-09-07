@@ -63,3 +63,32 @@ class OrganizationInvitationRevoked(BaseModel):
 
     revoked: Literal[True] = True
     local_recording_state: LocalRecordingState = "complete"
+
+
+HistoryInvitationStatus = Literal["accepted", "revoked", "expired"]
+
+
+class OrganizationInvitationHistoryItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: HistoryInvitationStatus
+    role: InvitationRole | None = None
+    role_state: InvitationRoleState
+    recipient_hint: str
+    created_at: datetime
+    expires_at: datetime | None = None
+
+
+class OrganizationInvitationHistoryResponse(BaseModel):
+    """Terminal invitation history page (Milestone 43).
+
+    ``total_invitations`` is the provider total matching the current M43 history
+    filter (accepted / revoked / expired / all-terminal), not an unfiltered count.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    page_size: int
+    next_cursor: str | None = None
+    total_invitations: int
+    items: list[OrganizationInvitationHistoryItem] = Field(default_factory=list)

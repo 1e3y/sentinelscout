@@ -1926,6 +1926,48 @@ export function revokeOrganizationInvitation(
   );
 }
 
+export type OrganizationInvitationHistoryStatus =
+  | "accepted"
+  | "revoked"
+  | "expired";
+
+export type OrganizationInvitationHistoryItem = {
+  status: OrganizationInvitationHistoryStatus;
+  role: OrganizationInvitationRole | null;
+  role_state: OrganizationInvitationRoleState;
+  recipient_hint: string;
+  created_at: string;
+  expires_at: string | null;
+};
+
+export type OrganizationInvitationHistoryResponse = {
+  page_size: number;
+  next_cursor: string | null;
+  /** Total matching the current history filter (not unfiltered). */
+  total_invitations: number;
+  items: OrganizationInvitationHistoryItem[];
+};
+
+export function fetchOrganizationInvitationHistory(
+  token: string,
+  options: {
+    page_size?: number;
+    cursor?: string | null;
+    /** Omit for all terminal. Do not pass "all". */
+    status?: OrganizationInvitationHistoryStatus;
+  } = {},
+): Promise<OrganizationInvitationHistoryResponse> {
+  const params = new URLSearchParams();
+  if (options.page_size != null) params.set("page_size", String(options.page_size));
+  if (options.cursor) params.set("cursor", options.cursor);
+  if (options.status) params.set("status", options.status);
+  const query = params.toString();
+  return apiFetch<OrganizationInvitationHistoryResponse>(
+    `/v1/organization-invitations/history${query ? `?${query}` : ""}`,
+    token,
+  );
+}
+
 export function updateFindingFollowUp(
   token: string,
   findingId: string,

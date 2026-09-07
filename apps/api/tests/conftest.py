@@ -41,6 +41,7 @@ from app.core.db import Base, get_db
 from app.core.security import StaticKeyTokenVerifier
 from app.main import create_app
 from app.services.clerk import (
+    ClerkInvitationHistoryView,
     ClerkInvitationMutationView,
     ClerkMembershipNotFound,
     ClerkOrgMembership,
@@ -97,6 +98,11 @@ class FakeClerkDirectory:
     create_invitation_calls: int = 0
     get_invitation_calls: int = 0
     revoke_invitation_calls: int = 0
+    list_invitation_history_calls: int = 0
+    last_history_list_statuses: tuple[str, ...] | None = None
+    history_list_total_override: int | None = None
+    # None | "pending_in_terminal" | "unknown_status" | "bad_email" | "missing_created_at"
+    history_list_corrupt: str | None = None
     _invitation_seq: int = 0
 
     def get_user(self, clerk_user_id: str) -> ClerkUserInfo:
@@ -328,6 +334,104 @@ class FakeClerkDirectory:
             )
         total = len(rows)
         return rows[offset : offset + limit], total
+
+    def list_organization_invitation_history(
+        self,
+        clerk_org_id: str,
+        *,
+        statuses: tuple[str, ...] | list[str],
+        limit: int,
+        offset: int,
+    ) -> tuple[list[ClerkInvitationHistoryView], int]:
+        self.list_invitation_history_calls += 1
+        status_tuple = tuple(statuses)
+        self.last_history_list_statuses = status_tuple
+        if self.fail_list_invitations:
+            raise OrganizationInvitationUnavailable()
+        if limit < 1 or offset < 0 or not status_tuple:
+            raise OrganizationInvitationUnavailable()
+        allowed = set(status_tuple)
+        rows = [
+            row
+            for row in self.invitations.get(clerk_org_id, [])
+            if row.status in allowed
+        ]
+        rows.sort(
+            key=lambda row: row.created_at_ms if row.created_at_ms is not None else 0,
+            reverse=True,
+        )
+        if self.history_list_corrupt == "pending_in_terminal" and rows:
+            bad = rows[0]
+            rows[0] = ClerkOrganizationInvitationRaw(
+                provider_invitation_id=bad.provider_invitation_id,
+                email_address=bad.email_address,
+                external_role=bad.external_role,
+                status="pending",
+                inviter_user_id=bad.inviter_user_id,
+                created_at_ms=bad.created_at_ms,
+                expires_at_ms=bad.expires_at_ms,
+            )
+        elif self.history_list_corrupt == "unknown_status" and rows:
+            bad = rows[0]
+            rows[0] = ClerkOrganizationInvitationRaw(
+                provider_invitation_id=bad.provider_invitation_id,
+                email_address=bad.email_address,
+                external_role=bad.external_role,
+                status="legacy_weird",
+                inviter_user_id=bad.inviter_user_id,
+                created_at_ms=bad.created_at_ms,
+                expires_at_ms=bad.expires_at_ms,
+            )
+        elif self.history_list_corrupt == "bad_email" and rows:
+            bad = rows[0]
+            rows[0] = ClerkOrganizationInvitationRaw(
+                provider_invitation_id=bad.provider_invitation_id,
+                email_address="not-an-email",
+                external_role=bad.external_role,
+                status=bad.status,
+                inviter_user_id=bad.inviter_user_id,
+                created_at_ms=bad.created_at_ms,
+                expires_at_ms=bad.expires_at_ms,
+            )
+        elif self.history_list_corrupt == "missing_created_at" and rows:
+            bad = rows[0]
+            rows[0] = ClerkOrganizationInvitationRaw(
+                provider_invitation_id=bad.provider_invitation_id,
+                email_address=bad.email_address,
+                external_role=bad.external_role,
+                status=bad.status,
+                inviter_user_id=bad.inviter_user_id,
+                created_at_ms=None,
+                expires_at_ms=bad.expires_at_ms,
+            )
+        total = (
+            self.history_list_total_override
+            if self.history_list_total_override is not None
+            else len(rows)
+        )
+        page = rows[offset : offset + limit]
+        views: list[ClerkInvitationHistoryView] = []
+        for row in page:
+            # Mirror production adapter: hint-only projection (no email retained).
+            from app.services.clerk import HttpClerkDirectory
+
+            try:
+                hint = HttpClerkDirectory._history_recipient_hint(row.email_address)
+            except OrganizationInvitationUnavailable:
+                raise
+            if row.created_at_ms is None:
+                raise OrganizationInvitationUnavailable()
+            status_value = (row.status or "").strip().lower()
+            views.append(
+                ClerkInvitationHistoryView(
+                    status=status_value,
+                    external_role=row.external_role,
+                    recipient_hint=hint,
+                    created_at_ms=row.created_at_ms,
+                    expires_at_ms=row.expires_at_ms,
+                )
+            )
+        return views, total
 
     def create_organization_invitation(
         self,

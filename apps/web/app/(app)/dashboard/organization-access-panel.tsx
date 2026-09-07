@@ -5,6 +5,7 @@ import { useEffect, useState, useTransition, type FormEvent } from "react";
 import {
   createOrganizationInvitation,
   fetchOrganizationAccess,
+  fetchOrganizationInvitationHistory,
   fetchOrganizationInvitations,
   removeOrganizationMember,
   revokeOrganizationInvitation,
@@ -13,6 +14,9 @@ import {
   type OrganizationAccessResponse,
   type OrganizationAccessRole,
   type OrganizationInvitation,
+  type OrganizationInvitationHistoryItem,
+  type OrganizationInvitationHistoryResponse,
+  type OrganizationInvitationHistoryStatus,
   type OrganizationInvitationsResponse,
 } from "@/lib/api";
 
@@ -38,6 +42,29 @@ function invitationRoleLabel(invite: OrganizationInvitation): string {
   if (invite.role === "admin") return "Admin";
   return "Member";
 }
+
+function historyRoleLabel(item: OrganizationInvitationHistoryItem): string {
+  if (item.role_state === "unrecognized" || item.role == null) {
+    return "Role not recognized";
+  }
+  if (item.role === "admin") return "Admin";
+  return "Member";
+}
+
+function historyStatusLabel(status: OrganizationInvitationHistoryStatus): string {
+  switch (status) {
+    case "accepted":
+      return "Accepted";
+    case "revoked":
+      return "Revoked";
+    case "expired":
+      return "Expired";
+    default:
+      return "Unknown";
+  }
+}
+
+type HistoryFilter = "terminal" | OrganizationInvitationHistoryStatus;
 
 function mirrorLabel(member: OrganizationAccessMember): string {
   switch (member.local_mirror_state) {
@@ -90,6 +117,10 @@ export function OrganizationAccessPanel({
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviting, setInviting] = useState(false);
   const [revokingRef, setRevokingRef] = useState<string | null>(null);
+  const [history, setHistory] =
+    useState<OrganizationInvitationHistoryResponse | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyFilter, setHistoryFilter] = useState<HistoryFilter>("terminal");
 
   function loadMembers(nextCursor: string | null = null) {
     if (!enabled || !isAdmin) return;
@@ -141,9 +172,46 @@ export function OrganizationAccessPanel({
     });
   }
 
+  function loadHistory(
+    filter: HistoryFilter = historyFilter,
+    nextCursor: string | null = null,
+  ) {
+    if (!enabled || !isAdmin) return;
+    startTransition(async () => {
+      setHistoryError(null);
+      try {
+        const token = await getToken();
+        if (!token) {
+          setHistoryError("Missing session token");
+          return;
+        }
+        const next = await fetchOrganizationInvitationHistory(token, {
+          page_size: 50,
+          cursor: nextCursor ?? undefined,
+          status: filter === "terminal" ? undefined : filter,
+        });
+        setHistory(next);
+      } catch (err) {
+        setHistoryError(
+          err instanceof Error
+            ? err.message
+            : "Organization invitation history could not be verified.",
+        );
+      }
+    });
+  }
+
+  function onHistoryFilterChange(next: HistoryFilter) {
+    // Filter change discards previous cursor (start from offset zero).
+    setHistoryFilter(next);
+    setHistory(null);
+    loadHistory(next, null);
+  }
+
   useEffect(() => {
     loadMembers(null);
     loadInvites(null);
+    loadHistory("terminal", null);
     // Explicit initial load only — no polling / background refresh interval.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, isAdmin]);
@@ -547,6 +615,93 @@ export function OrganizationAccessPanel({
                         ? "Revoking…"
                         : "Revoke invitation"}
                     </button>
+                  </div>
+                </li>
+              ))
+            )}
+          </ul>
+        ) : null}
+      </div>
+
+      <div className="space-y-4">
+        <div className="space-y-1">
+          <h3 className="text-base font-medium">Invitation history</h3>
+          <p className="text-sm text-zinc-600">
+            Recent terminal invitations from your identity provider. Accepted
+            does not by itself confirm a linked Sentinel Scout account.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          {(
+            [
+              ["terminal", "All terminal"],
+              ["accepted", "Accepted"],
+              ["revoked", "Revoked"],
+              ["expired", "Expired"],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              className={`rounded border px-3 py-1 text-sm disabled:opacity-50 ${
+                historyFilter === value
+                  ? "border-zinc-800 bg-zinc-100"
+                  : "border-zinc-300"
+              }`}
+              disabled={pending}
+              onClick={() => onHistoryFilterChange(value)}
+            >
+              {label}
+            </button>
+          ))}
+          <button
+            type="button"
+            className="rounded border border-zinc-300 px-3 py-1 text-sm disabled:opacity-50"
+            disabled={pending}
+            onClick={() => loadHistory(historyFilter, null)}
+          >
+            Refresh
+          </button>
+          {history?.next_cursor ? (
+            <button
+              type="button"
+              className="rounded border border-zinc-300 px-3 py-1 text-sm disabled:opacity-50"
+              disabled={pending}
+              onClick={() => loadHistory(historyFilter, history.next_cursor)}
+            >
+              Load more
+            </button>
+          ) : null}
+        </div>
+
+        {historyError ? (
+          <p className="text-sm text-red-700">{historyError}</p>
+        ) : null}
+
+        {history ? (
+          <ul className="divide-y divide-zinc-200 border border-zinc-200">
+            {history.items.length === 0 ? (
+              <li className="px-3 py-3 text-sm text-zinc-500">
+                No invitation history on this page.
+              </li>
+            ) : (
+              history.items.map((item, index) => (
+                <li
+                  key={`${item.recipient_hint}-${item.created_at}-${item.status}-${index}`}
+                  className="space-y-1 px-3 py-3 text-sm"
+                >
+                  <div className="font-medium text-zinc-900">
+                    {item.recipient_hint}
+                  </div>
+                  <div className="text-zinc-600">
+                    {historyStatusLabel(item.status)} · {historyRoleLabel(item)}
+                  </div>
+                  <div className="text-xs text-zinc-500">
+                    Invited {formatWhen(item.created_at)}
+                    {item.status === "expired" && item.expires_at
+                      ? ` · Invitation expiry ${formatWhen(item.expires_at)}`
+                      : ""}
                   </div>
                 </li>
               ))

@@ -106,6 +106,29 @@ class ClerkInvitationMutationView:
     external_role: str | None
 
 
+@dataclass(frozen=True)
+class ClerkInvitationHistoryView:
+    """Terminal invitation history row (M43).
+
+    Full recipient email is converted to recipient_hint inside the adapter and
+    never leaves this projection.
+    """
+
+    status: str
+    external_role: str | None
+    recipient_hint: str
+    created_at_ms: int
+    expires_at_ms: int | None
+
+
+# Canonical provider terminal statuses for M43 "All terminal" (fixed order).
+ORGANIZATION_INVITATION_TERMINAL_STATUSES: tuple[str, ...] = (
+    "accepted",
+    "revoked",
+    "expired",
+)
+
+
 class ClerkDirectory(Protocol):
     def get_user(self, clerk_user_id: str) -> ClerkUserInfo: ...
 
@@ -156,6 +179,15 @@ class ClerkDirectory(Protocol):
         limit: int,
         offset: int,
     ) -> tuple[list[ClerkOrganizationInvitationRaw], int | None]: ...
+
+    def list_organization_invitation_history(
+        self,
+        clerk_org_id: str,
+        *,
+        statuses: tuple[str, ...] | list[str],
+        limit: int,
+        offset: int,
+    ) -> tuple[list[ClerkInvitationHistoryView], int]: ...
 
     def create_organization_invitation(
         self,
@@ -592,6 +624,65 @@ class HttpClerkDirectory:
             total = None
         return invitations, total
 
+    def list_organization_invitation_history(
+        self,
+        clerk_org_id: str,
+        *,
+        statuses: tuple[str, ...] | list[str],
+        limit: int,
+        offset: int,
+    ) -> tuple[list[ClerkInvitationHistoryView], int]:
+        """List terminal organization invitations (M43).
+
+        Endpoint: GET /organizations/{organization_id}/invitations
+        Multi-status filter uses repeated ``status`` query parameters (Clerk
+        documented multi-value filter), never comma-joined or unfiltered fetch.
+        """
+        if not self._settings.clerk_secret_key:
+            raise OrganizationInvitationUnavailable()
+        if not isinstance(clerk_org_id, str) or not clerk_org_id.strip():
+            raise OrganizationInvitationUnavailable()
+        if limit < 1 or offset < 0:
+            raise OrganizationInvitationUnavailable()
+        status_values = tuple(statuses)
+        if not status_values:
+            raise OrganizationInvitationUnavailable()
+        for value in status_values:
+            if not isinstance(value, str) or not value.strip():
+                raise OrganizationInvitationUnavailable()
+        # Repeated status=… query params — the documented multi-value encoding.
+        params: list[tuple[str, str | int]] = [
+            ("limit", limit),
+            ("offset", offset),
+        ]
+        for value in status_values:
+            params.append(("status", value))
+        try:
+            response = self._client.get(
+                f"/organizations/{clerk_org_id}/invitations",
+                params=params,
+            )
+        except (httpx.TimeoutException, httpx.TransportError, httpx.HTTPError) as exc:
+            raise OrganizationInvitationUnavailable() from exc
+        if response.status_code >= 400:
+            raise OrganizationInvitationUnavailable()
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise OrganizationInvitationUnavailable() from exc
+        if not isinstance(payload, dict):
+            raise OrganizationInvitationUnavailable()
+        items = payload.get("data", [])
+        if not isinstance(items, list):
+            raise OrganizationInvitationUnavailable()
+        total_raw = payload.get("total_count")
+        if not isinstance(total_raw, int) or isinstance(total_raw, bool) or total_raw < 0:
+            raise OrganizationInvitationUnavailable()
+        history: list[ClerkInvitationHistoryView] = []
+        for item in items:
+            history.append(self._parse_invitation_history_view(item))
+        return history, total_raw
+
     def create_organization_invitation(
         self,
         clerk_org_id: str,
@@ -786,6 +877,53 @@ class HttpClerkDirectory:
             provider_invitation_id=invitation_id,
             status=status_value,
             external_role=external_role,
+        )
+
+    @staticmethod
+    def _history_recipient_hint(email_raw: str) -> str:
+        """Validate mailbox and emit M40-compatible recipient_hint; discard email."""
+        from email_validator import EmailNotValidError, validate_email
+
+        if not isinstance(email_raw, str) or not email_raw.strip():
+            raise OrganizationInvitationUnavailable()
+        try:
+            canonical = str(
+                validate_email(email_raw.strip(), check_deliverability=False).normalized
+            )
+        except EmailNotValidError as exc:
+            raise OrganizationInvitationUnavailable() from exc
+        if "@" not in canonical:
+            raise OrganizationInvitationUnavailable()
+        local, _, domain = canonical.partition("@")
+        if not local or not domain:
+            raise OrganizationInvitationUnavailable()
+        return f"{local[0]}***@{domain}"
+
+    @classmethod
+    def _parse_invitation_history_view(cls, payload: object) -> ClerkInvitationHistoryView:
+        """Project provider invitation to hint-only history view (no email retained)."""
+        if not isinstance(payload, dict):
+            raise OrganizationInvitationUnavailable()
+        status_raw = payload.get("status")
+        if not isinstance(status_raw, str) or not status_raw.strip():
+            raise OrganizationInvitationUnavailable()
+        status_value = status_raw.strip().lower()
+        role_raw = payload.get("role")
+        external_role = role_raw if isinstance(role_raw, str) else None
+        email_raw = payload.get("email_address")
+        if not isinstance(email_raw, str):
+            raise OrganizationInvitationUnavailable()
+        recipient_hint = cls._history_recipient_hint(email_raw)
+        created_at_ms = _coerce_unix_ms(payload.get("created_at"))
+        if created_at_ms is None:
+            raise OrganizationInvitationUnavailable()
+        expires_at_ms = _coerce_unix_ms(payload.get("expires_at"))
+        return ClerkInvitationHistoryView(
+            status=status_value,
+            external_role=external_role,
+            recipient_hint=recipient_hint,
+            created_at_ms=created_at_ms,
+            expires_at_ms=expires_at_ms,
         )
 
 

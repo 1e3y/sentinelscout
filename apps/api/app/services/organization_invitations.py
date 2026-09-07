@@ -19,16 +19,21 @@ from sqlalchemy.orm import Session
 
 from app.models.organization import Organization
 from app.schemas.organization_invitations import (
+    HistoryInvitationStatus,
     LocalRecordingState,
     OrganizationInvitation,
     OrganizationInvitationCreated,
+    OrganizationInvitationHistoryItem,
+    OrganizationInvitationHistoryResponse,
     OrganizationInvitationRevoked,
     OrganizationInvitationsResponse,
 )
 from app.services.audit import record_audit
 from app.services.authorization import persistable_org_role
 from app.services.clerk import (
+    ORGANIZATION_INVITATION_TERMINAL_STATUSES,
     ClerkDirectory,
+    ClerkInvitationHistoryView,
     ClerkInvitationMutationView,
     ClerkOrganizationInvitationRaw,
     OrganizationInvitationAlreadyMember,
@@ -51,8 +56,10 @@ DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 100
 CURSOR_VERSION = "v1"
 INVALID_CURSOR_DETAIL = "Invalid organization invitations cursor"
+INVALID_HISTORY_CURSOR_DETAIL = "Invalid organization invitation history cursor"
 CREATE_UNAVAILABLE_DETAIL = "Organization invitation could not be created."
 LIST_UNAVAILABLE_DETAIL = "Organization invitations could not be verified."
+HISTORY_UNAVAILABLE_DETAIL = "Organization invitation history could not be verified."
 REVOKE_UNAVAILABLE_DETAIL = "Organization invitation could not be revoked."
 PENDING_NOT_FOUND_DETAIL = "Pending invitation not found."
 ALREADY_MEMBER_DETAIL = "This person already has organization access."
@@ -63,6 +70,13 @@ CREATE_CLOCK_SKEW = timedelta(seconds=120)
 AUDIT_ACTION = "organization.invitation_created"
 REVOKE_AUDIT_ACTION = "organization.invitation_revoked"
 AUDIT_PERSIST_ATTEMPTS = 3
+HISTORY_FILTER_TERMINAL = "terminal"
+HISTORY_FILTER_KEYS = frozenset(
+    {HISTORY_FILTER_TERMINAL, "accepted", "revoked", "expired"}
+)
+HISTORY_STATUS_VALUES = frozenset({"accepted", "revoked", "expired"})
+# Bound history cursor offsets to a sane ceiling (provider offset pagination).
+HISTORY_CURSOR_OFFSET_MAX = 1_000_000
 
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 
@@ -78,6 +92,13 @@ def raise_list_unavailable() -> None:
     raise HTTPException(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         detail=LIST_UNAVAILABLE_DETAIL,
+    )
+
+
+def raise_history_unavailable() -> None:
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail=HISTORY_UNAVAILABLE_DETAIL,
     )
 
 
@@ -656,4 +677,181 @@ def revoke_organization_invitation(
     return OrganizationInvitationRevoked(
         revoked=True,
         local_recording_state=recording,
+    )
+
+
+def normalize_history_filter_key(status: str | None) -> str:
+    """Map public status query to internal filter key.
+
+    Omitted status → ``terminal`` (all terminal). ``status=all`` and other
+    strings are rejected by the route as 422 before this is called with junk.
+    """
+    if status is None:
+        return HISTORY_FILTER_TERMINAL
+    if status in HISTORY_STATUS_VALUES:
+        return status
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail="Invalid organization invitation history status",
+    )
+
+
+def provider_statuses_for_history_filter(filter_key: str) -> tuple[str, ...]:
+    if filter_key == HISTORY_FILTER_TERMINAL:
+        return ORGANIZATION_INVITATION_TERMINAL_STATUSES
+    if filter_key in HISTORY_STATUS_VALUES:
+        return (filter_key,)
+    raise_history_unavailable()
+    raise AssertionError("unreachable")
+
+
+def encode_history_cursor(*, filter_key: str, offset: int) -> str:
+    if filter_key not in HISTORY_FILTER_KEYS:
+        raise_history_unavailable()
+    if offset < 0 or offset > HISTORY_CURSOR_OFFSET_MAX:
+        raise_history_unavailable()
+    payload = f"{CURSOR_VERSION}|{filter_key}|{offset}"
+    return urlsafe_b64encode(payload.encode("utf-8")).decode("ascii").rstrip("=")
+
+
+def decode_history_cursor(raw: str, *, expected_filter_key: str) -> int:
+    if not raw or not raw.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=INVALID_HISTORY_CURSOR_DETAIL,
+        )
+    padded = raw + ("=" * (-len(raw) % 4))
+    try:
+        decoded = urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=INVALID_HISTORY_CURSOR_DETAIL,
+        ) from exc
+    parts = decoded.split("|")
+    if len(parts) != 3 or parts[0] != CURSOR_VERSION:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=INVALID_HISTORY_CURSOR_DETAIL,
+        )
+    filter_key = parts[1]
+    if filter_key not in HISTORY_FILTER_KEYS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=INVALID_HISTORY_CURSOR_DETAIL,
+        )
+    if filter_key != expected_filter_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=INVALID_HISTORY_CURSOR_DETAIL,
+        )
+    try:
+        offset = int(parts[2])
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=INVALID_HISTORY_CURSOR_DETAIL,
+        ) from exc
+    if offset < 0 or offset > HISTORY_CURSOR_OFFSET_MAX:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=INVALID_HISTORY_CURSOR_DETAIL,
+        )
+    return offset
+
+
+def _history_item_from_view(
+    view: ClerkInvitationHistoryView,
+    *,
+    allowed_statuses: frozenset[str],
+) -> OrganizationInvitationHistoryItem:
+    status_value = view.status.strip().lower() if isinstance(view.status, str) else ""
+    if status_value not in allowed_statuses or status_value not in HISTORY_STATUS_VALUES:
+        raise_history_unavailable()
+    created_at = _ms_to_dt(view.created_at_ms)
+    if created_at is None:
+        raise_history_unavailable()
+    if not isinstance(view.recipient_hint, str) or not view.recipient_hint.strip():
+        raise_history_unavailable()
+    # Guard: full email must never appear in the history view / DTO path.
+    if "@" in view.recipient_hint and "***" not in view.recipient_hint:
+        raise_history_unavailable()
+    role, role_state = classify_provider_role(view.external_role)
+    typed_status: HistoryInvitationStatus
+    if status_value == "accepted":
+        typed_status = "accepted"
+    elif status_value == "revoked":
+        typed_status = "revoked"
+    elif status_value == "expired":
+        typed_status = "expired"
+    else:
+        raise_history_unavailable()
+    return OrganizationInvitationHistoryItem(
+        status=typed_status,
+        role=role,
+        role_state=role_state,
+        recipient_hint=view.recipient_hint,
+        created_at=created_at,
+        expires_at=_ms_to_dt(view.expires_at_ms),
+    )
+
+
+def list_organization_invitation_history(
+    *,
+    organization: Organization,
+    directory: ClerkDirectory,
+    status: str | None = None,
+    page_size: int = DEFAULT_PAGE_SIZE,
+    cursor: str | None = None,
+) -> OrganizationInvitationHistoryResponse:
+    """List terminal provider invitation history (Milestone 43). Read-only."""
+    if not organization.clerk_org_id or not organization.clerk_org_id.strip():
+        raise_history_unavailable()
+
+    filter_key = normalize_history_filter_key(status)
+    provider_statuses = provider_statuses_for_history_filter(filter_key)
+    allowed = frozenset(provider_statuses)
+
+    size = min(max(page_size, 1), MAX_PAGE_SIZE)
+    offset = decode_history_cursor(cursor, expected_filter_key=filter_key) if cursor else 0
+
+    try:
+        rows, total = directory.list_organization_invitation_history(
+            organization.clerk_org_id,
+            statuses=provider_statuses,
+            limit=size,
+            offset=offset,
+        )
+    except OrganizationInvitationUnavailable:
+        raise_history_unavailable()
+    except Exception:
+        raise_history_unavailable()
+
+    # Provider pagination invariants for the filtered result set.
+    if not isinstance(total, int) or isinstance(total, bool) or total < 0:
+        raise_history_unavailable()
+    if len(rows) > size:
+        raise_history_unavailable()
+    if offset + len(rows) > total:
+        raise_history_unavailable()
+
+    items: list[OrganizationInvitationHistoryItem] = []
+    for row in rows:
+        # Adapter must already be email-free.
+        if hasattr(row, "email_address"):
+            raise_history_unavailable()
+        items.append(_history_item_from_view(row, allowed_statuses=allowed))
+
+    consumed = offset + len(items)
+    next_cursor = (
+        encode_history_cursor(filter_key=filter_key, offset=consumed)
+        if consumed < total
+        else None
+    )
+
+    return OrganizationInvitationHistoryResponse(
+        page_size=size,
+        next_cursor=next_cursor,
+        total_invitations=total,
+        items=items,
     )
