@@ -39,6 +39,8 @@ from app.schemas.organization_audit import (
     OrganizationAuditEventsResponse,
     OrganizationAuditResource,
     OrganizationAuditRow,
+    OrganizationMemberRemovedAuditDetail,
+    OrganizationMemberRoleChangedAuditDetail,
     RemediationRecordedAuditDetail,
     RemediationWorkflowAuditDetail,
     ReportGeneratedAuditDetail,
@@ -352,6 +354,22 @@ _VISIBLE_SPECS: tuple[VisibleActionSpec, ...] = (
         frozenset({"assessment_report_share"}),
         frozenset({"report_id", "expires_at", "creation_origin"}),
     ),
+    VisibleActionSpec(
+        "organization.member_role_changed",
+        "organization_member_role_changed",
+        "Organization member role changed",
+        "organization_member",
+        frozenset({"organization_member"}),
+        frozenset({"target_user_id", "previous_role", "new_role"}),
+    ),
+    VisibleActionSpec(
+        "organization.member_removed",
+        "organization_member_removed",
+        "Organization member removed",
+        "organization_member",
+        frozenset({"organization_member"}),
+        frozenset({"target_user_id", "previous_role"}),
+    ),
 )
 
 VISIBLE_INTERNAL_ACTIONS: frozenset[str] = frozenset(
@@ -657,6 +675,17 @@ def _build_detail(
             expires_at=_parse_dt(scalars.get("expires_at")),
             creation_origin=scalars.get("creation_origin") or None,
         )
+    if action == "organization_member_role_changed":
+        return OrganizationMemberRoleChangedAuditDetail(
+            target_user_id=_parse_uuid(scalars.get("target_user_id")),
+            previous_role=scalars.get("previous_role") or None,
+            new_role=scalars.get("new_role") or None,
+        )
+    if action == "organization_member_removed":
+        return OrganizationMemberRemovedAuditDetail(
+            target_user_id=_parse_uuid(scalars.get("target_user_id")),
+            previous_role=scalars.get("previous_role") or None,
+        )
     if action == "finding_resolved":
         return None
     return None
@@ -696,6 +725,7 @@ def _enrich_resources(
     operation_ids: set[UUID] = set()
     report_ids: set[UUID] = set()
     alert_ids: set[UUID] = set()
+    member_user_ids: set[UUID] = set()
 
     for row in rows:
         spec = _SPEC_BY_INTERNAL.get(row.action)
@@ -712,6 +742,13 @@ def _enrich_resources(
             target_ids.add(row.resource_id)
         elif kind == "assessment" and row.resource_id:
             operation_ids.add(row.resource_id)
+        elif kind == "organization_member":
+            if row.resource_id:
+                member_user_ids.add(row.resource_id)
+            else:
+                tid = _parse_uuid(scalars.get("target_user_id"))
+                if tid:
+                    member_user_ids.add(tid)
         elif kind == "monitoring":
             # domain may be in scalars; target via live monitoring not required
             pass
@@ -832,6 +869,15 @@ def _enrich_resources(
         ).all():
             alerts[alert.id] = alert
 
+    member_names: dict[UUID, str | None] = {}
+    if member_user_ids:
+        for user in db.scalars(
+            select(User)
+            .options(load_only(User.id, User.name))
+            .where(User.id.in_(member_user_ids))
+        ).all():
+            member_names[user.id] = user.name
+
     resources: dict[UUID, OrganizationAuditResource] = {}
     for row in rows:
         spec = _SPEC_BY_INTERNAL.get(row.action)
@@ -900,6 +946,11 @@ def _enrich_resources(
                 or (alert.alert_type if alert else None)
                 or UNAVAILABLE_RESOURCE_LABEL
             )
+        elif kind == "organization_member":
+            uid = resource_id or _parse_uuid(scalars.get("target_user_id"))
+            resource_id = uid
+            name = member_names.get(uid) if uid else None
+            label = name or "Organization member"
 
         resources[row.id] = OrganizationAuditResource(
             kind=kind,

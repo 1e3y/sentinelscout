@@ -133,6 +133,7 @@ export default async function DashboardPage() {
           <OrganizationAccessPanel
             enabled={Boolean(activeOrg)}
             isAdmin={me?.active_organization_role === "admin"}
+            currentUserId={me?.id ?? null}
           />
         </>
       )}

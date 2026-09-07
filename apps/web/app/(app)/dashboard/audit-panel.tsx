@@ -134,6 +134,10 @@ export function AuditPanel({ enabled, isAdmin }: Props) {
             <option value="report_generated">Report generated</option>
             <option value="report_share_created">Share created</option>
             <option value="report_share_revoked">Share revoked</option>
+            <option value="organization_member_role_changed">
+              Member role changed
+            </option>
+            <option value="organization_member_removed">Member removed</option>
             <option value="alert_acknowledged">Alert acknowledged</option>
           </select>
         </label>

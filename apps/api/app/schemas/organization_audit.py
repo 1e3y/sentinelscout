@@ -34,6 +34,8 @@ CustomerAuditAction = Literal[
     "report_generated",
     "report_share_created",
     "report_share_revoked",
+    "organization_member_role_changed",
+    "organization_member_removed",
 ]
 
 CustomerAuditResourceKind = Literal[
@@ -47,6 +49,7 @@ CustomerAuditResourceKind = Literal[
     "report_share",
     "candidate",
     "alert",
+    "organization_member",
 ]
 
 ActorKind = Literal["organization_member", "system", "unavailable_user"]
@@ -183,6 +186,23 @@ class ReportShareAuditDetail(BaseModel):
     creation_origin: str | None = None
 
 
+class OrganizationMemberRoleChangedAuditDetail(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["organization_member_role_changed"] = "organization_member_role_changed"
+    target_user_id: UUID | None = None
+    previous_role: str | None = None
+    new_role: str | None = None
+
+
+class OrganizationMemberRemovedAuditDetail(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["organization_member_removed"] = "organization_member_removed"
+    target_user_id: UUID | None = None
+    previous_role: str | None = None
+
+
 OrganizationAuditDetail = Annotated[
     TargetAuditDetail
     | AssessmentAuditDetail
@@ -196,7 +216,9 @@ OrganizationAuditDetail = Annotated[
     | CandidateDismissedAuditDetail
     | AlertAcknowledgedAuditDetail
     | ReportGeneratedAuditDetail
-    | ReportShareAuditDetail,
+    | ReportShareAuditDetail
+    | OrganizationMemberRoleChangedAuditDetail
+    | OrganizationMemberRemovedAuditDetail,
     Field(discriminator="kind"),
 ]
 

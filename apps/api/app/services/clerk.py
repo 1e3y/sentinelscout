@@ -13,6 +13,18 @@ class CurrentAccessUnavailable(Exception):
     """Authoritative current org membership could not be verified (M38 fail-closed)."""
 
 
+class ClerkMembershipNotFound(Exception):
+    """Authoritative organization membership is absent for the target user."""
+
+
+class OrganizationAccessWriteUnavailable(Exception):
+    """Definite inability to complete an organization-access provider write."""
+
+
+class OrganizationAccessWriteAmbiguous(Exception):
+    """Provider write outcome is ambiguous (timeout/5xx/connection after attempt)."""
+
+
 @dataclass(frozen=True)
 class ClerkUserInfo:
     clerk_user_id: str
@@ -68,6 +80,26 @@ class ClerkDirectory(Protocol):
         limit: int,
         offset: int,
     ) -> tuple[list[ClerkOrganizationMembershipRaw], int | None]: ...
+
+    def get_organization_membership(
+        self,
+        clerk_org_id: str,
+        clerk_user_id: str,
+    ) -> ClerkOrganizationMembershipRaw: ...
+
+    def update_organization_membership_role(
+        self,
+        clerk_org_id: str,
+        clerk_user_id: str,
+        *,
+        role: str,
+    ) -> ClerkOrganizationMembershipRaw: ...
+
+    def delete_organization_membership(
+        self,
+        clerk_org_id: str,
+        clerk_user_id: str,
+    ) -> None: ...
 
 
 class HttpClerkDirectory:
@@ -282,6 +314,150 @@ class HttpClerkDirectory:
         else:
             total = None
         return members, total
+
+    def get_organization_membership(
+        self,
+        clerk_org_id: str,
+        clerk_user_id: str,
+    ) -> ClerkOrganizationMembershipRaw:
+        """Authoritative single membership read (M39 verification / reconciliation)."""
+        if not self._settings.clerk_secret_key:
+            raise OrganizationAccessWriteUnavailable()
+        if not isinstance(clerk_org_id, str) or not clerk_org_id.strip():
+            raise OrganizationAccessWriteUnavailable()
+        if not isinstance(clerk_user_id, str) or not clerk_user_id.strip():
+            raise OrganizationAccessWriteUnavailable()
+        try:
+            response = self._client.get(
+                f"/organizations/{clerk_org_id}/memberships/{clerk_user_id}"
+            )
+        except (httpx.TimeoutException, httpx.TransportError, httpx.HTTPError) as exc:
+            raise OrganizationAccessWriteUnavailable() from exc
+        if response.status_code == 404:
+            raise ClerkMembershipNotFound()
+        if response.status_code >= 400:
+            raise OrganizationAccessWriteUnavailable()
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise OrganizationAccessWriteUnavailable() from exc
+        return self._parse_membership_payload(payload, expected_user_id=clerk_user_id)
+
+    def update_organization_membership_role(
+        self,
+        clerk_org_id: str,
+        clerk_user_id: str,
+        *,
+        role: str,
+    ) -> ClerkOrganizationMembershipRaw:
+        """PATCH organization membership role (Clerk BAPI).
+
+        Endpoint: PATCH /organizations/{organization_id}/memberships/{user_id}
+        Body: {"role": "org:admin" | "org:member"}
+        """
+        if not self._settings.clerk_secret_key:
+            raise OrganizationAccessWriteUnavailable()
+        if not isinstance(clerk_org_id, str) or not clerk_org_id.strip():
+            raise OrganizationAccessWriteUnavailable()
+        if not isinstance(clerk_user_id, str) or not clerk_user_id.strip():
+            raise OrganizationAccessWriteUnavailable()
+        if not isinstance(role, str) or not role.strip():
+            raise OrganizationAccessWriteUnavailable()
+        try:
+            response = self._client.patch(
+                f"/organizations/{clerk_org_id}/memberships/{clerk_user_id}",
+                json={"role": role},
+            )
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            raise OrganizationAccessWriteAmbiguous() from exc
+        except httpx.HTTPError as exc:
+            raise OrganizationAccessWriteAmbiguous() from exc
+        if response.status_code == 404:
+            raise ClerkMembershipNotFound()
+        if response.status_code >= 500:
+            raise OrganizationAccessWriteAmbiguous()
+        if response.status_code >= 400:
+            # Definite client/validation rejection — treat as no successful mutation.
+            raise OrganizationAccessWriteUnavailable()
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            # Response may still have applied; reconcile via re-read.
+            raise OrganizationAccessWriteAmbiguous() from exc
+        return self._parse_membership_payload(payload, expected_user_id=clerk_user_id)
+
+    def delete_organization_membership(
+        self,
+        clerk_org_id: str,
+        clerk_user_id: str,
+    ) -> None:
+        """DELETE organization membership (Clerk BAPI).
+
+        Endpoint: DELETE /organizations/{organization_id}/memberships/{user_id}
+        """
+        if not self._settings.clerk_secret_key:
+            raise OrganizationAccessWriteUnavailable()
+        if not isinstance(clerk_org_id, str) or not clerk_org_id.strip():
+            raise OrganizationAccessWriteUnavailable()
+        if not isinstance(clerk_user_id, str) or not clerk_user_id.strip():
+            raise OrganizationAccessWriteUnavailable()
+        try:
+            response = self._client.delete(
+                f"/organizations/{clerk_org_id}/memberships/{clerk_user_id}"
+            )
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            raise OrganizationAccessWriteAmbiguous() from exc
+        except httpx.HTTPError as exc:
+            raise OrganizationAccessWriteAmbiguous() from exc
+        if response.status_code == 404:
+            raise ClerkMembershipNotFound()
+        if response.status_code >= 500:
+            raise OrganizationAccessWriteAmbiguous()
+        if response.status_code >= 400:
+            raise OrganizationAccessWriteUnavailable()
+        # 200/204 success — no body required.
+
+    @staticmethod
+    def _parse_membership_payload(
+        payload: object,
+        *,
+        expected_user_id: str,
+    ) -> ClerkOrganizationMembershipRaw:
+        if not isinstance(payload, dict):
+            raise OrganizationAccessWriteUnavailable()
+        public_user = payload.get("public_user_data")
+        if not isinstance(public_user, dict):
+            # Some responses nest user under `public_user_data`; role is top-level.
+            provider_user_id = payload.get("user_id")
+            if not isinstance(provider_user_id, str) or not provider_user_id:
+                raise OrganizationAccessWriteUnavailable()
+            role_raw = payload.get("role")
+            external_role = role_raw if isinstance(role_raw, str) else None
+            if provider_user_id != expected_user_id:
+                raise OrganizationAccessWriteUnavailable()
+            return ClerkOrganizationMembershipRaw(
+                provider_user_id=provider_user_id,
+                external_role=external_role,
+                first_name=None,
+                last_name=None,
+            )
+        provider_user_id = public_user.get("user_id")
+        if not isinstance(provider_user_id, str) or not provider_user_id:
+            raise OrganizationAccessWriteUnavailable()
+        if provider_user_id != expected_user_id:
+            raise OrganizationAccessWriteUnavailable()
+        role_raw = payload.get("role")
+        external_role = role_raw if isinstance(role_raw, str) else None
+        first_raw = public_user.get("first_name")
+        last_raw = public_user.get("last_name")
+        first_name = first_raw.strip() if isinstance(first_raw, str) and first_raw.strip() else None
+        last_name = last_raw.strip() if isinstance(last_raw, str) and last_raw.strip() else None
+        return ClerkOrganizationMembershipRaw(
+            provider_user_id=provider_user_id,
+            external_role=external_role,
+            first_name=first_name,
+            last_name=last_name,
+        )
 
 
 def primary_email_info(data: dict) -> tuple[str, bool]:

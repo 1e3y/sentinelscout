@@ -101,6 +101,9 @@ class Settings(BaseSettings):
     rate_limit_organization_access_read: int = Field(
         default=60, alias="RATE_LIMIT_ORGANIZATION_ACCESS_READ"
     )
+    rate_limit_organization_access_mutate: int = Field(
+        default=30, alias="RATE_LIMIT_ORGANIZATION_ACCESS_MUTATE"
+    )
     rate_limit_window_seconds: int = Field(default=3600, alias="RATE_LIMIT_WINDOW_SECONDS")
 
     email_delivery_enabled: bool = Field(default=False, alias="EMAIL_DELIVERY_ENABLED")

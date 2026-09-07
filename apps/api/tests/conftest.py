@@ -41,7 +41,10 @@ from app.services.clerk import (
     ClerkOrganizationMember,
     ClerkOrganizationMembershipRaw,
     ClerkUserInfo,
+    ClerkMembershipNotFound,
     CurrentAccessUnavailable,
+    OrganizationAccessWriteAmbiguous,
+    OrganizationAccessWriteUnavailable,
 )
 from app.services.dns import StaticDnsTxtResolver
 
@@ -55,9 +58,17 @@ class FakeClerkDirectory:
     fail_get_user: bool = False
     fail_memberships: bool = False
     fail_org_memberships_raw: bool = False
+    fail_get_membership: bool = False
+    # None | "unavailable" | "ambiguous" | "ambiguous_applied"
+    update_role_mode: str | None = None
+    # None | "unavailable" | "ambiguous" | "ambiguous_applied"
+    delete_membership_mode: str | None = None
     get_user_calls: int = 0
     memberships_raw_calls: int = 0
     list_organization_members_calls: int = 0
+    get_membership_calls: int = 0
+    update_role_calls: int = 0
+    delete_membership_calls: int = 0
 
     def get_user(self, clerk_user_id: str) -> ClerkUserInfo:
         self.get_user_calls += 1
@@ -144,6 +155,102 @@ class FakeClerkDirectory:
         if limit < 1 or offset < 0:
             raise CurrentAccessUnavailable()
         return members[offset : offset + limit], total
+
+    def _raw_for(self, clerk_org_id: str, clerk_user_id: str) -> ClerkOrganizationMembershipRaw:
+        match = next(
+            (
+                row
+                for row in self.memberships.get(clerk_user_id, [])
+                if row.clerk_org_id == clerk_org_id
+            ),
+            None,
+        )
+        if match is None:
+            raise ClerkMembershipNotFound()
+        info = self.users.get(clerk_user_id)
+        first_name: str | None = None
+        last_name: str | None = None
+        if info is not None and info.name:
+            parts = info.name.split(None, 1)
+            first_name = parts[0] if parts else None
+            last_name = parts[1] if len(parts) > 1 else None
+        return ClerkOrganizationMembershipRaw(
+            provider_user_id=clerk_user_id,
+            external_role=match.role,
+            first_name=first_name,
+            last_name=last_name,
+        )
+
+    def get_organization_membership(
+        self,
+        clerk_org_id: str,
+        clerk_user_id: str,
+    ) -> ClerkOrganizationMembershipRaw:
+        self.get_membership_calls += 1
+        if self.fail_get_membership:
+            raise OrganizationAccessWriteUnavailable()
+        return self._raw_for(clerk_org_id, clerk_user_id)
+
+    def update_organization_membership_role(
+        self,
+        clerk_org_id: str,
+        clerk_user_id: str,
+        *,
+        role: str,
+    ) -> ClerkOrganizationMembershipRaw:
+        self.update_role_calls += 1
+        mode = self.update_role_mode
+        if mode == "unavailable":
+            raise OrganizationAccessWriteUnavailable()
+        if mode == "ambiguous":
+            raise OrganizationAccessWriteAmbiguous()
+        if mode == "ambiguous_applied":
+            rows = self.memberships.get(clerk_user_id, [])
+            for index, row in enumerate(rows):
+                if row.clerk_org_id == clerk_org_id:
+                    rows[index] = ClerkOrgMembership(
+                        clerk_org_id=row.clerk_org_id,
+                        org_name=row.org_name,
+                        role=role,
+                    )
+                    break
+            else:
+                raise ClerkMembershipNotFound()
+            raise OrganizationAccessWriteAmbiguous()
+        rows = self.memberships.get(clerk_user_id, [])
+        for index, row in enumerate(rows):
+            if row.clerk_org_id == clerk_org_id:
+                rows[index] = ClerkOrgMembership(
+                    clerk_org_id=row.clerk_org_id,
+                    org_name=row.org_name,
+                    role=role,
+                )
+                return self._raw_for(clerk_org_id, clerk_user_id)
+        raise ClerkMembershipNotFound()
+
+    def delete_organization_membership(
+        self,
+        clerk_org_id: str,
+        clerk_user_id: str,
+    ) -> None:
+        self.delete_membership_calls += 1
+        mode = self.delete_membership_mode
+        if mode == "unavailable":
+            raise OrganizationAccessWriteUnavailable()
+        if mode == "ambiguous":
+            raise OrganizationAccessWriteAmbiguous()
+        if mode == "ambiguous_applied":
+            rows = self.memberships.get(clerk_user_id, [])
+            remaining = [row for row in rows if row.clerk_org_id != clerk_org_id]
+            if len(remaining) == len(rows):
+                raise ClerkMembershipNotFound()
+            self.memberships[clerk_user_id] = remaining
+            raise OrganizationAccessWriteAmbiguous()
+        rows = self.memberships.get(clerk_user_id, [])
+        remaining = [row for row in rows if row.clerk_org_id != clerk_org_id]
+        if len(remaining) == len(rows):
+            raise ClerkMembershipNotFound()
+        self.memberships[clerk_user_id] = remaining
 
 
 @pytest.fixture(scope="session")

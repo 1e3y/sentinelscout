@@ -4,13 +4,17 @@ import { useAuth } from "@clerk/nextjs";
 import { useEffect, useState, useTransition } from "react";
 import {
   fetchOrganizationAccess,
+  removeOrganizationMember,
+  updateOrganizationMemberRole,
   type OrganizationAccessMember,
   type OrganizationAccessResponse,
+  type OrganizationAccessRole,
 } from "@/lib/api";
 
 type Props = {
   enabled: boolean;
   isAdmin: boolean;
+  currentUserId: string | null;
 };
 
 function roleLabel(member: OrganizationAccessMember): string {
@@ -39,11 +43,26 @@ function mirrorLabel(member: OrganizationAccessMember): string {
   }
 }
 
-export function OrganizationAccessPanel({ enabled, isAdmin }: Props) {
+function canManageMember(member: OrganizationAccessMember): boolean {
+  return (
+    member.account_link_state === "linked" &&
+    member.user_id != null &&
+    member.role_state === "recognized" &&
+    member.role === "member"
+  );
+}
+
+export function OrganizationAccessPanel({
+  enabled,
+  isAdmin,
+  currentUserId,
+}: Props) {
   const { getToken } = useAuth();
   const [data, setData] = useState<OrganizationAccessResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const [mutatingUserId, setMutatingUserId] = useState<string | null>(null);
 
   function load(nextCursor: string | null = null) {
     if (!enabled || !isAdmin) return;
@@ -75,6 +94,96 @@ export function OrganizationAccessPanel({ enabled, isAdmin }: Props) {
     // Explicit initial load only — no polling / background refresh interval.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, isAdmin]);
+
+  function refreshAfterMutation() {
+    load(null);
+  }
+
+  function onPromote(member: OrganizationAccessMember) {
+    if (!member.user_id || !canManageMember(member)) return;
+    const label = member.display_name ?? "this member";
+    if (
+      !window.confirm(
+        `Promote ${label} to organization admin? They will be able to manage organization access.`,
+      )
+    ) {
+      return;
+    }
+    startTransition(async () => {
+      setError(null);
+      setNotice(null);
+      setMutatingUserId(member.user_id);
+      try {
+        const token = await getToken();
+        if (!token) {
+          setError("Missing session token");
+          return;
+        }
+        const result = await updateOrganizationMemberRole(
+          token,
+          member.user_id!,
+          "admin" satisfies OrganizationAccessRole,
+        );
+        if (result.local_recording_state === "audit_degraded") {
+          setNotice(
+            "Access was updated, but local activity recording is temporarily incomplete.",
+          );
+        }
+        refreshAfterMutation();
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Organization access could not be updated.",
+        );
+      } finally {
+        setMutatingUserId(null);
+      }
+    });
+  }
+
+  function onRemove(member: OrganizationAccessMember) {
+    if (!member.user_id || !canManageMember(member)) return;
+    if (member.user_id === currentUserId) {
+      setError("Organization administrators cannot be demoted or removed.");
+      return;
+    }
+    const label = member.display_name ?? "this member";
+    if (
+      !window.confirm(
+        `Remove ${label} from this organization? Their account and historical work remain; only organization membership is removed.`,
+      )
+    ) {
+      return;
+    }
+    startTransition(async () => {
+      setError(null);
+      setNotice(null);
+      setMutatingUserId(member.user_id);
+      try {
+        const token = await getToken();
+        if (!token) {
+          setError("Missing session token");
+          return;
+        }
+        const result = await removeOrganizationMember(token, member.user_id!);
+        if (result.local_recording_state === "audit_degraded") {
+          setNotice(
+            "Access was updated, but local activity recording is temporarily incomplete.",
+          );
+        }
+        refreshAfterMutation();
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Organization access could not be updated.",
+        );
+      } finally {
+        setMutatingUserId(null);
+      }
+    });
+  }
 
   if (!enabled) return null;
 
@@ -122,6 +231,7 @@ export function OrganizationAccessPanel({ enabled, isAdmin }: Props) {
       </div>
 
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
+      {notice ? <p className="text-sm text-amber-800">{notice}</p> : null}
       {pending && !data ? (
         <p className="text-sm text-zinc-500">Loading current access…</p>
       ) : null}
@@ -140,24 +250,68 @@ export function OrganizationAccessPanel({ enabled, isAdmin }: Props) {
                 No current members on this page.
               </li>
             ) : (
-              data.items.map((member, index) => (
-                <li
-                  key={member.user_id ?? `unlinked-${index}`}
-                  className="space-y-1 px-3 py-3 text-sm"
-                >
-                  <div className="font-medium text-zinc-900">
-                    {member.display_name ?? "Organization member"}
-                  </div>
-                  <div className="text-zinc-600">{roleLabel(member)}</div>
-                  <div className="text-xs text-zinc-500">
-                    {member.account_link_state === "linked"
-                      ? "Linked account"
-                      : "Not yet linked in Sentinel Scout"}
-                    {" · "}
-                    {mirrorLabel(member)}
-                  </div>
-                </li>
-              ))
+              data.items.map((member, index) => {
+                const busy =
+                  pending && mutatingUserId != null && mutatingUserId === member.user_id;
+                const manageable = canManageMember(member);
+                return (
+                  <li
+                    key={member.user_id ?? `unlinked-${index}`}
+                    className="space-y-2 px-3 py-3 text-sm"
+                  >
+                    <div className="font-medium text-zinc-900">
+                      {member.display_name ?? "Organization member"}
+                    </div>
+                    <div className="text-zinc-600">{roleLabel(member)}</div>
+                    <div className="text-xs text-zinc-500">
+                      {member.account_link_state === "linked"
+                        ? "Linked account"
+                        : "Not yet linked in Sentinel Scout"}
+                      {" · "}
+                      {mirrorLabel(member)}
+                    </div>
+                    {member.role_state === "unrecognized" ? (
+                      <p className="text-xs text-zinc-500">
+                        Management is unavailable because this member&apos;s
+                        current organization role is not recognized.
+                      </p>
+                    ) : null}
+                    {member.account_link_state === "not_linked" ? (
+                      <p className="text-xs text-zinc-500">
+                        Management is unavailable until this member links an
+                        account in Sentinel Scout.
+                      </p>
+                    ) : null}
+                    {member.role_state === "recognized" &&
+                    member.role === "admin" ? (
+                      <p className="text-xs text-zinc-500">
+                        Organization administrators cannot be demoted or removed
+                        here.
+                      </p>
+                    ) : null}
+                    {manageable ? (
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        <button
+                          type="button"
+                          className="rounded border border-zinc-300 px-2 py-1 text-xs disabled:opacity-50"
+                          disabled={busy || pending}
+                          onClick={() => onPromote(member)}
+                        >
+                          Make admin
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded border border-red-300 px-2 py-1 text-xs text-red-800 disabled:opacity-50"
+                          disabled={busy || pending}
+                          onClick={() => onRemove(member)}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ) : null}
+                  </li>
+                );
+              })
             )}
           </ul>
         </div>

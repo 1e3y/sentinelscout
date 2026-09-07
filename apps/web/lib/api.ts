@@ -784,7 +784,9 @@ export type OrganizationAuditAction =
   | "alert_acknowledged"
   | "report_generated"
   | "report_share_created"
-  | "report_share_revoked";
+  | "report_share_revoked"
+  | "organization_member_role_changed"
+  | "organization_member_removed";
 
 export type OrganizationAuditResourceKind =
   | "target"
@@ -796,7 +798,8 @@ export type OrganizationAuditResourceKind =
   | "report"
   | "report_share"
   | "candidate"
-  | "alert";
+  | "alert"
+  | "organization_member";
 
 export type OrganizationAuditActor = {
   kind: "organization_member" | "system" | "unavailable_user";
@@ -1798,6 +1801,44 @@ export function fetchOrganizationAccess(
   return apiFetch<OrganizationAccessResponse>(
     `/v1/organization-access${query ? `?${query}` : ""}`,
     token,
+  );
+}
+
+export type OrganizationAccessLocalRecordingState = "complete" | "audit_degraded";
+
+export type OrganizationMemberRoleUpdateResponse = {
+  member: OrganizationAccessMember;
+  local_recording_state: OrganizationAccessLocalRecordingState;
+};
+
+export type OrganizationMemberRemovalResponse = {
+  removed_user_id: string;
+  local_recording_state: OrganizationAccessLocalRecordingState;
+};
+
+export function updateOrganizationMemberRole(
+  token: string,
+  userId: string,
+  role: OrganizationAccessRole,
+): Promise<OrganizationMemberRoleUpdateResponse> {
+  return apiFetch<OrganizationMemberRoleUpdateResponse>(
+    `/v1/organization-access/members/${userId}/role`,
+    token,
+    {
+      method: "PUT",
+      body: JSON.stringify({ role }),
+    },
+  );
+}
+
+export function removeOrganizationMember(
+  token: string,
+  userId: string,
+): Promise<OrganizationMemberRemovalResponse> {
+  return apiFetch<OrganizationMemberRemovalResponse>(
+    `/v1/organization-access/members/${userId}`,
+    token,
+    { method: "DELETE" },
   );
 }
 
