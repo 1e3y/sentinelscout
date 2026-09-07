@@ -13,6 +13,10 @@ class CurrentAccessUnavailable(Exception):
     """Authoritative current org membership could not be verified (M38 fail-closed)."""
 
 
+class FindingOwnershipPresenceUnavailable(Exception):
+    """Authoritative membership presence for finding ownership could not be verified."""
+
+
 class ClerkMembershipNotFound(Exception):
     """Authoritative organization membership is absent for the target user."""
 
@@ -155,6 +159,13 @@ class ClerkDirectory(Protocol):
         clerk_org_id: str,
         clerk_user_id: str,
     ) -> ClerkOrganizationMembershipRaw: ...
+
+    def list_organization_membership_presence(
+        self,
+        clerk_org_id: str,
+        *,
+        provider_user_ids: tuple[str, ...] | list[str],
+    ) -> frozenset[str]: ...
 
     def update_organization_membership_role(
         self,
@@ -454,6 +465,92 @@ class HttpClerkDirectory:
         except ValueError as exc:
             raise OrganizationAccessWriteUnavailable() from exc
         return self._parse_membership_payload(payload, expected_user_id=clerk_user_id)
+
+    def list_organization_membership_presence(
+        self,
+        clerk_org_id: str,
+        *,
+        provider_user_ids: tuple[str, ...] | list[str],
+    ) -> frozenset[str]:
+        """Batch current-membership presence for M44 finding ownership review.
+
+        Endpoint: GET /organizations/{organization_id}/memberships
+        Wire: repeated ``user_id`` query params + ``limit=U`` + ``offset=0``.
+
+        Returns only the set of requested provider user IDs that are currently
+        members. Discards email/name/role/metadata/membership ids immediately.
+        """
+        if not self._settings.clerk_secret_key:
+            raise FindingOwnershipPresenceUnavailable()
+        if not isinstance(clerk_org_id, str) or not clerk_org_id.strip():
+            raise FindingOwnershipPresenceUnavailable()
+        requested = tuple(provider_user_ids)
+        if not requested:
+            return frozenset()
+        if len(requested) > 100:
+            raise FindingOwnershipPresenceUnavailable()
+        requested_set: set[str] = set()
+        for raw in requested:
+            if not isinstance(raw, str) or not raw.strip():
+                raise FindingOwnershipPresenceUnavailable()
+            value = raw.strip()
+            if value in requested_set:
+                raise FindingOwnershipPresenceUnavailable()
+            requested_set.add(value)
+        # Canonical order for stable wire encoding.
+        ordered = tuple(sorted(requested_set))
+        limit = len(ordered)
+        params: list[tuple[str, str | int]] = [
+            ("limit", limit),
+            ("offset", 0),
+        ]
+        for user_id in ordered:
+            params.append(("user_id", user_id))
+        try:
+            response = self._client.get(
+                f"/organizations/{clerk_org_id}/memberships",
+                params=params,
+            )
+        except (httpx.TimeoutException, httpx.TransportError, httpx.HTTPError) as exc:
+            raise FindingOwnershipPresenceUnavailable() from exc
+        if response.status_code >= 400:
+            raise FindingOwnershipPresenceUnavailable()
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise FindingOwnershipPresenceUnavailable() from exc
+        if not isinstance(payload, dict):
+            raise FindingOwnershipPresenceUnavailable()
+        items = payload.get("data", [])
+        if not isinstance(items, list):
+            raise FindingOwnershipPresenceUnavailable()
+        if len(items) > limit:
+            raise FindingOwnershipPresenceUnavailable()
+
+        present: set[str] = set()
+        for item in items:
+            if not isinstance(item, dict):
+                raise FindingOwnershipPresenceUnavailable()
+            provider_user_id = self._membership_presence_user_id(item)
+            if provider_user_id not in requested_set:
+                raise FindingOwnershipPresenceUnavailable()
+            if provider_user_id in present:
+                raise FindingOwnershipPresenceUnavailable()
+            present.add(provider_user_id)
+        return frozenset(present)
+
+    @staticmethod
+    def _membership_presence_user_id(payload: dict) -> str:
+        """Extract provider user id for presence only; ignore all other fields."""
+        public_user = payload.get("public_user_data")
+        if isinstance(public_user, dict):
+            raw = public_user.get("user_id")
+            if isinstance(raw, str) and raw.strip():
+                return raw.strip()
+        top = payload.get("user_id")
+        if isinstance(top, str) and top.strip():
+            return top.strip()
+        raise FindingOwnershipPresenceUnavailable()
 
     def update_organization_membership_role(
         self,

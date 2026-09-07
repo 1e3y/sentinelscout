@@ -124,7 +124,10 @@ export default async function DashboardPage() {
             isAdmin={me?.active_organization_role === "admin"}
             currentUserId={me?.id ?? null}
           />
-          <FindingsSection enabled={Boolean(activeOrg)} />
+          <FindingsSection
+            enabled={Boolean(activeOrg)}
+            isAdmin={me?.active_organization_role === "admin"}
+          />
           <ReportsPanel enabled={Boolean(activeOrg)} />
           <AuditPanel
             enabled={Boolean(activeOrg)}

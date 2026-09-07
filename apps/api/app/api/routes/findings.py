@@ -11,6 +11,7 @@ from app.api.deps import (
     get_clerk_directory,
     get_db,
     require_active_org_actor,
+    require_org_admin,
 )
 from app.models.asset import Asset
 from app.models.organization import Organization
@@ -24,6 +25,7 @@ from app.schemas.finding_follow_up_reminder_status import (
     FindingFollowUpReminderHistoryResponse,
     FindingFollowUpReminderStatusResponse,
 )
+from app.schemas.finding_ownership_review import FindingOwnershipReviewResponse
 from app.schemas.finding_remediation import (
     CreateFindingRemediationRevisionRequest,
     FindingRemediationHistoryResponse,
@@ -56,6 +58,12 @@ from app.services.findings.follow_up_reminder_status import (
     DEFAULT_HISTORY_PAGE_SIZE,
     MAX_HISTORY_PAGE_SIZE,
 )
+from app.services.findings.ownership_review import DEFAULT_PAGE_SIZE as OWNERSHIP_DEFAULT_PAGE_SIZE
+from app.services.findings.ownership_review import MAX_PAGE_SIZE as OWNERSHIP_MAX_PAGE_SIZE
+from app.services.findings.ownership_review import (
+    decode_ownership_review_cursor,
+    list_finding_ownership_review,
+)
 from app.services.findings.remediation_record import (
     DEFAULT_REMEDIATION_PAGE_SIZE,
     MAX_REMEDIATION_PAGE_SIZE,
@@ -72,6 +80,7 @@ from app.services.findings_inbox import (
 from app.services.provenance import build_finding_provenance
 from app.services.rate_limit import (
     ACTION_FINDING_FOLLOW_UP,
+    ACTION_ORGANIZATION_FINDING_OWNERSHIP_READ,
     ACTION_REMEDIATION_RECORD,
     ACTION_RETEST,
     enforce_rate_limit,
@@ -193,6 +202,48 @@ def findings_inbox_endpoint(
         retest_state=retest_state,
         assigned_to_user_id=assigned_to_user_id,
         unassigned=unassigned,
+    )
+
+
+# Must stay above "/{finding_id}" for the same reason as /inbox.
+@router.get("/ownership-review", response_model=FindingOwnershipReviewResponse)
+def finding_ownership_review_endpoint(
+    auth: Annotated[AuthContext, Depends(get_auth_context)],
+    db: Annotated[Session, Depends(get_db)],
+    directory: Annotated[ClerkDirectory, Depends(get_clerk_directory)],
+    page_size: Annotated[
+        int, Query(ge=1, le=OWNERSHIP_MAX_PAGE_SIZE)
+    ] = OWNERSHIP_DEFAULT_PAGE_SIZE,
+    cursor: str | None = None,
+) -> FindingOwnershipReviewResponse:
+    """Read-only review of active Finding ownership for the verified active org.
+
+    Assigned and unassigned active Findings (open / in_progress / ready_for_retest).
+    Clerk membership presence is authoritative for assigned rows. Local
+    OrganizationMembership is never used. Resolved rows that leave the active
+    set between requests may disappear (normal mutable-collection behavior).
+    Ordering uses immutable Finding.created_at / Finding.id only;
+    follow_up_due_at is returned but does not participate in pagination.
+    """
+    require_active_organization(auth)
+    assert auth.active_organization is not None
+    organization, _membership, actor = require_org_admin(
+        auth.active_organization.id, auth, db
+    )
+    if cursor is not None:
+        decode_ownership_review_cursor(cursor)
+    enforce_rate_limit(
+        db,
+        organization_id=organization.id,
+        user_id=actor.user_id,
+        action=ACTION_ORGANIZATION_FINDING_OWNERSHIP_READ,
+    )
+    return list_finding_ownership_review(
+        db,
+        organization=organization,
+        directory=directory,
+        page_size=page_size,
+        cursor=cursor,
     )
 
 

@@ -27,6 +27,9 @@ if TYPE_CHECKING:
 
 FINDING_STATUSES = frozenset({"open", "in_progress", "ready_for_retest", "resolved"})
 FINDING_SEVERITIES = frozenset({"informational", "low", "medium", "high", "critical"})
+# Active (non-resolved) findings — shared domain constant for inbox, reports, M44.
+OPEN_FINDING_STATUSES = frozenset({"open", "in_progress", "ready_for_retest"})
+RESOLVED_FINDING_STATUSES = frozenset({"resolved"})
 
 # Milestone 8 user-allowed transitions only.
 ALLOWED_REMEDIATION_TRANSITIONS: dict[str, frozenset[str]] = {

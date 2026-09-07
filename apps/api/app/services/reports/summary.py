@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.models import finding as finding_domain
 from app.services.coverage import (
     REASON_DISCOVERY_TRUNCATED,
     REASON_HEADER_EVIDENCE_UNAVAILABLE,
@@ -30,8 +31,9 @@ SEVERITY_ORDER: dict[str, int] = {
 }
 ACTION_REQUIRED_MIN_RANK = SEVERITY_ORDER["medium"]
 
-OPEN_FINDING_STATUSES = frozenset({"open", "in_progress", "ready_for_retest"})
-RESOLVED_FINDING_STATUSES = frozenset({"resolved"})
+# Re-exported from Finding domain for existing report imports.
+OPEN_FINDING_STATUSES = finding_domain.OPEN_FINDING_STATUSES
+RESOLVED_FINDING_STATUSES = finding_domain.RESOLVED_FINDING_STATUSES
 
 REASON_HTTP_OBSERVATION_NOT_OBTAINED = "http_observation_not_obtained"
 

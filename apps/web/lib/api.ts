@@ -1425,6 +1425,48 @@ export function fetchFindingsInbox(
   );
 }
 
+export type FindingOwnershipAssignmentState =
+  | "unassigned"
+  | "current_member"
+  | "not_current_member";
+
+export type FindingOwnershipAssignee = {
+  user_id: string;
+  display_name: string | null;
+};
+
+export type FindingOwnershipReviewItem = {
+  finding_id: string;
+  target_id: string;
+  target_label: string;
+  title: string;
+  severity: "informational" | "low" | "medium" | "high" | "critical";
+  status: "open" | "in_progress" | "ready_for_retest";
+  assignment_state: FindingOwnershipAssignmentState;
+  assignee: FindingOwnershipAssignee | null;
+  follow_up_due_at: string | null;
+  created_at: string;
+};
+
+export type FindingOwnershipReviewResponse = {
+  items: FindingOwnershipReviewItem[];
+  next_cursor: string | null;
+};
+
+export function fetchFindingOwnershipReview(
+  token: string,
+  options: { page_size?: number; cursor?: string | null } = {},
+): Promise<FindingOwnershipReviewResponse> {
+  const params = new URLSearchParams();
+  if (options.page_size != null) params.set("page_size", String(options.page_size));
+  if (options.cursor) params.set("cursor", options.cursor);
+  const query = params.toString();
+  return apiFetch<FindingOwnershipReviewResponse>(
+    `/v1/findings/ownership-review${query ? `?${query}` : ""}`,
+    token,
+  );
+}
+
 export type AlertDeliveryStatus = {
   channel: string;
   destination_key: string;

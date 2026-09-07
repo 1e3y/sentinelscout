@@ -50,6 +50,7 @@ from app.services.clerk import (
     ClerkOrganizationMembershipRaw,
     ClerkUserInfo,
     CurrentAccessUnavailable,
+    FindingOwnershipPresenceUnavailable,
     OrganizationAccessWriteAmbiguous,
     OrganizationAccessWriteUnavailable,
     OrganizationInvitationAlreadyMember,
@@ -71,6 +72,7 @@ class FakeClerkDirectory:
     fail_get_user: bool = False
     fail_memberships: bool = False
     fail_org_memberships_raw: bool = False
+    fail_membership_presence: bool = False
     fail_get_membership: bool = False
     fail_list_invitations: bool = False
     # None | "non_pending" | "missing_created_at"
@@ -90,6 +92,10 @@ class FakeClerkDirectory:
     delete_membership_mode: str | None = None
     get_user_calls: int = 0
     memberships_raw_calls: int = 0
+    membership_presence_calls: int = 0
+    last_presence_provider_user_ids: tuple[str, ...] | None = None
+    last_presence_limit: int | None = None
+    last_presence_offset: int | None = None
     list_organization_members_calls: int = 0
     get_membership_calls: int = 0
     update_role_calls: int = 0
@@ -225,6 +231,29 @@ class FakeClerkDirectory:
         if self.fail_get_membership:
             raise OrganizationAccessWriteUnavailable()
         return self._raw_for(clerk_org_id, clerk_user_id)
+
+    def list_organization_membership_presence(
+        self,
+        clerk_org_id: str,
+        *,
+        provider_user_ids: tuple[str, ...] | list[str],
+    ) -> frozenset[str]:
+        """M44 presence projection: requested provider IDs that are current members."""
+        self.membership_presence_calls += 1
+        requested = tuple(
+            sorted({raw.strip() for raw in provider_user_ids if isinstance(raw, str) and raw.strip()})
+        )
+        self.last_presence_provider_user_ids = requested
+        self.last_presence_limit = len(requested)
+        self.last_presence_offset = 0
+        if self.fail_membership_presence:
+            raise FindingOwnershipPresenceUnavailable()
+        present: set[str] = set()
+        for clerk_user_id in requested:
+            rows = self.memberships.get(clerk_user_id, [])
+            if any(row.clerk_org_id == clerk_org_id for row in rows):
+                present.add(clerk_user_id)
+        return frozenset(present)
 
     def update_organization_membership_role(
         self,
