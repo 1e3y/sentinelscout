@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { FindingFollowUpReviewPanel } from "./finding-follow-up-review-panel";
 import { FindingOwnershipReviewPanel } from "./finding-ownership-review-panel";
 import { FindingsInboxPanel } from "./findings-inbox-panel";
 import { FindingsPanel } from "./findings-panel";
@@ -27,11 +28,18 @@ export function FindingsSection({ enabled, isAdmin }: Props) {
         reloadToken={reloadToken}
       />
       {isAdmin ? (
-        <FindingOwnershipReviewPanel
-          enabled={enabled}
-          selectedFindingId={selectedFindingId}
-          onOpenFinding={setSelectedFindingId}
-        />
+        <>
+          <FindingOwnershipReviewPanel
+            enabled={enabled}
+            selectedFindingId={selectedFindingId}
+            onOpenFinding={setSelectedFindingId}
+          />
+          <FindingFollowUpReviewPanel
+            enabled={enabled}
+            selectedFindingId={selectedFindingId}
+            onOpenFinding={setSelectedFindingId}
+          />
+        </>
       ) : null}
       <FindingsPanel
         findingId={selectedFindingId}

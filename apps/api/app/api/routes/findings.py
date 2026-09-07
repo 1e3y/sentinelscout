@@ -1,4 +1,5 @@
-from typing import Annotated
+from datetime import datetime, timezone
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
@@ -25,6 +26,7 @@ from app.schemas.finding_follow_up_reminder_status import (
     FindingFollowUpReminderHistoryResponse,
     FindingFollowUpReminderStatusResponse,
 )
+from app.schemas.finding_follow_up_review import FindingFollowUpReviewResponse
 from app.schemas.finding_ownership_review import FindingOwnershipReviewResponse
 from app.schemas.finding_remediation import (
     CreateFindingRemediationRevisionRequest,
@@ -58,6 +60,15 @@ from app.services.findings.follow_up_reminder_status import (
     DEFAULT_HISTORY_PAGE_SIZE,
     MAX_HISTORY_PAGE_SIZE,
 )
+from app.services.findings.follow_up_review import (
+    DEFAULT_PAGE_SIZE as FOLLOW_UP_REVIEW_DEFAULT_PAGE_SIZE,
+)
+from app.services.findings.follow_up_review import MAX_PAGE_SIZE as FOLLOW_UP_REVIEW_MAX_PAGE_SIZE
+from app.services.findings.follow_up_review import (
+    list_finding_follow_up_review,
+    normalize_due_filter,
+    resolve_follow_up_review_cursor,
+)
 from app.services.findings.ownership_review import DEFAULT_PAGE_SIZE as OWNERSHIP_DEFAULT_PAGE_SIZE
 from app.services.findings.ownership_review import MAX_PAGE_SIZE as OWNERSHIP_MAX_PAGE_SIZE
 from app.services.findings.ownership_review import (
@@ -80,6 +91,7 @@ from app.services.findings_inbox import (
 from app.services.provenance import build_finding_provenance
 from app.services.rate_limit import (
     ACTION_FINDING_FOLLOW_UP,
+    ACTION_ORGANIZATION_FINDING_FOLLOW_UP_READ,
     ACTION_ORGANIZATION_FINDING_OWNERSHIP_READ,
     ACTION_REMEDIATION_RECORD,
     ACTION_RETEST,
@@ -244,6 +256,55 @@ def finding_ownership_review_endpoint(
         directory=directory,
         page_size=page_size,
         cursor=cursor,
+    )
+
+
+# Must stay above "/{finding_id}" for the same reason as /inbox.
+@router.get("/follow-up-review", response_model=FindingFollowUpReviewResponse)
+def finding_follow_up_review_endpoint(
+    auth: Annotated[AuthContext, Depends(get_auth_context)],
+    db: Annotated[Session, Depends(get_db)],
+    page_size: Annotated[
+        int, Query(ge=1, le=FOLLOW_UP_REVIEW_MAX_PAGE_SIZE)
+    ] = FOLLOW_UP_REVIEW_DEFAULT_PAGE_SIZE,
+    cursor: str | None = None,
+    due_state: Annotated[
+        Literal["no_due_date", "upcoming", "overdue"] | None, Query()
+    ] = None,
+) -> FindingFollowUpReviewResponse:
+    """Read-only due-date review of active Findings for the verified active org.
+
+    DB-only. No Clerk/provider calls. Due classification uses one frozen UTC
+    evaluation_time for the request (and the same instant across one cursor walk).
+    """
+    require_active_organization(auth)
+    assert auth.active_organization is not None
+    organization, _membership, actor = require_org_admin(
+        auth.active_organization.id, auth, db
+    )
+    request_now = datetime.now(timezone.utc)
+    due_filter = normalize_due_filter(due_state)
+    evaluation_time, cursor_created_at, cursor_finding_id = (
+        resolve_follow_up_review_cursor(
+            cursor,
+            due_filter=due_filter,
+            request_now=request_now,
+        )
+    )
+    enforce_rate_limit(
+        db,
+        organization_id=organization.id,
+        user_id=actor.user_id,
+        action=ACTION_ORGANIZATION_FINDING_FOLLOW_UP_READ,
+    )
+    return list_finding_follow_up_review(
+        db,
+        organization=organization,
+        due_filter=due_filter,
+        evaluation_time=evaluation_time,
+        page_size=page_size,
+        cursor_created_at=cursor_created_at,
+        cursor_finding_id=cursor_finding_id,
     )
 
 

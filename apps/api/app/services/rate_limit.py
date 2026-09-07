@@ -34,6 +34,7 @@ ACTION_ORGANIZATION_INVITATION_READ = "organization.invitation.read"
 ACTION_ORGANIZATION_INVITATION_REVOKE = "organization.invitation.revoke"
 ACTION_ORGANIZATION_INVITATION_HISTORY_READ = "organization.invitation.history.read"
 ACTION_ORGANIZATION_FINDING_OWNERSHIP_READ = "organization.finding_ownership.read"
+ACTION_ORGANIZATION_FINDING_FOLLOW_UP_READ = "organization.finding_follow_up.read"
 SHARED_REPORT_COARSE_PARTITIONS = 64
 
 
@@ -62,6 +63,9 @@ def _limit_for_action(settings: Settings, action: str) -> int:
         ),
         ACTION_ORGANIZATION_FINDING_OWNERSHIP_READ: (
             settings.rate_limit_organization_finding_ownership_read
+        ),
+        ACTION_ORGANIZATION_FINDING_FOLLOW_UP_READ: (
+            settings.rate_limit_organization_finding_follow_up_read
         ),
     }.get(action, settings.rate_limit_operation_create)
 

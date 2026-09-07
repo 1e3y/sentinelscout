@@ -1467,6 +1467,51 @@ export function fetchFindingOwnershipReview(
   );
 }
 
+export type FindingFollowUpDueState = "no_due_date" | "upcoming" | "overdue";
+
+export type FindingFollowUpReviewAssignee = {
+  user_id: string;
+  display_name: string | null;
+};
+
+export type FindingFollowUpReviewItem = {
+  finding_id: string;
+  target_id: string;
+  target_label: string;
+  title: string;
+  severity: "informational" | "low" | "medium" | "high" | "critical";
+  status: "open" | "in_progress" | "ready_for_retest";
+  due_state: FindingFollowUpDueState;
+  follow_up_due_at: string | null;
+  assignee: FindingFollowUpReviewAssignee | null;
+  created_at: string;
+};
+
+export type FindingFollowUpReviewResponse = {
+  evaluation_time: string;
+  items: FindingFollowUpReviewItem[];
+  next_cursor: string | null;
+};
+
+export function fetchFindingFollowUpReview(
+  token: string,
+  options: {
+    page_size?: number;
+    cursor?: string | null;
+    due_state?: FindingFollowUpDueState;
+  } = {},
+): Promise<FindingFollowUpReviewResponse> {
+  const params = new URLSearchParams();
+  if (options.page_size != null) params.set("page_size", String(options.page_size));
+  if (options.cursor) params.set("cursor", options.cursor);
+  if (options.due_state) params.set("due_state", options.due_state);
+  const query = params.toString();
+  return apiFetch<FindingFollowUpReviewResponse>(
+    `/v1/findings/follow-up-review${query ? `?${query}` : ""}`,
+    token,
+  );
+}
+
 export type AlertDeliveryStatus = {
   channel: string;
   destination_key: string;
