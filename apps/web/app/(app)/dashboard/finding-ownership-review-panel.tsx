@@ -1,13 +1,18 @@
 "use client";
 
 import { useAuth } from "@clerk/nextjs";
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import {
+  FindingOwnershipAssignModal,
+  type OwnershipAssignIntent,
+} from "./finding-ownership-assign-modal";
 import {
   fetchFindingOwnershipReview,
   type FindingOwnershipAssignmentState,
   type FindingOwnershipReviewItem,
   type FindingOwnershipReviewResponse,
 } from "@/lib/api";
+import { organizationMemberLabel } from "@/lib/organization-member-label";
 
 type Props = {
   enabled: boolean;
@@ -23,14 +28,20 @@ const ASSIGNMENT_LABELS: Record<FindingOwnershipAssignmentState, string> = {
   not_current_member: "No longer a current organization member",
 };
 
+const ACTION_LABELS: Record<FindingOwnershipAssignmentState, string> = {
+  unassigned: "Assign owner",
+  not_current_member: "Reassign owner",
+  current_member: "Change owner",
+};
+
 function formatTime(value: string | null | undefined): string {
   if (!value) return "—";
   return new Date(value).toLocaleString();
 }
 
 function assigneeLabel(item: FindingOwnershipReviewItem): string {
-  if (item.assignee == null) return "—";
-  return item.assignee.display_name ?? "—";
+  if (item.assignee == null) return "Unassigned";
+  return organizationMemberLabel(item.assignee.display_name);
 }
 
 export function FindingOwnershipReviewPanel({
@@ -43,23 +54,38 @@ export function FindingOwnershipReviewPanel({
     null,
   );
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [refreshWarning, setRefreshWarning] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const [assignIntent, setAssignIntent] = useState<OwnershipAssignIntent | null>(
+    null,
+  );
+  const [assignGeneration, setAssignGeneration] = useState(0);
+  const pageCursorRef = useRef<string | null>(null);
+
+  const fetchPage = useCallback(
+    async (cursor: string | null) => {
+      const token = await getToken();
+      if (!token) {
+        throw new Error("Missing session token");
+      }
+      return fetchFindingOwnershipReview(token, {
+        page_size: PAGE_SIZE,
+        cursor,
+      });
+    },
+    [getToken],
+  );
 
   const load = useCallback(
-    (nextCursor: string | null = null) => {
+    (cursor: string | null) => {
       if (!enabled) return;
       startTransition(async () => {
         setError(null);
         try {
-          const token = await getToken();
-          if (!token) {
-            setError("Missing session token");
-            return;
-          }
-          const next = await fetchFindingOwnershipReview(token, {
-            page_size: PAGE_SIZE,
-            cursor: nextCursor ?? undefined,
-          });
+          const next = await fetchPage(cursor);
+          pageCursorRef.current = cursor;
           setPayload(next);
         } catch (err) {
           setError(
@@ -70,12 +96,52 @@ export function FindingOwnershipReviewPanel({
         }
       });
     },
-    [enabled, getToken],
+    [enabled, fetchPage],
   );
+
+  const refreshCurrentPage = useCallback(async () => {
+    const next = await fetchPage(pageCursorRef.current);
+    setPayload(next);
+  }, [fetchPage]);
 
   useEffect(() => {
     load(null);
   }, [load]);
+
+  const handleWriteSucceeded = useCallback(async () => {
+    setSuccess("Finding owner updated.");
+    setRefreshWarning(null);
+    setNotice(null);
+    setError(null);
+    try {
+      await refreshCurrentPage();
+    } catch {
+      setRefreshWarning(
+        "Assignment updated, but ownership review could not be refreshed.",
+      );
+    }
+  }, [refreshCurrentPage]);
+
+  const handleAlreadyOwner = useCallback(async () => {
+    setSuccess(null);
+    setRefreshWarning(null);
+    setNotice("The selected member is already the current owner.");
+    setError(null);
+    try {
+      await refreshCurrentPage();
+    } catch {
+      setError("Finding ownership could not be verified.");
+    }
+  }, [refreshCurrentPage]);
+
+  const handleResolvedConflict = useCallback(() => {
+    setSuccess(null);
+    setRefreshWarning(null);
+    setNotice(null);
+    void refreshCurrentPage().catch(() => {
+      setError("Finding ownership could not be verified.");
+    });
+  }, [refreshCurrentPage]);
 
   if (!enabled) return null;
 
@@ -86,8 +152,8 @@ export function FindingOwnershipReviewPanel({
           <h2 className="text-lg font-medium">Finding ownership review</h2>
           <p className="text-sm text-zinc-600">
             Active findings for this organization. Membership is checked against
-            the current organization directory. Reassignment happens on the
-            finding page.
+            the current organization directory. Assign or reassign a current
+            member here, or open the finding for the full follow-up workflow.
           </p>
         </div>
         <button
@@ -100,15 +166,20 @@ export function FindingOwnershipReviewPanel({
         </button>
       </div>
 
-      {error ? (
-        <p className="text-sm text-red-800">{error}</p>
-      ) : payload == null ? (
+      {success ? <p className="text-sm text-zinc-800">{success}</p> : null}
+      {refreshWarning ? (
+        <p className="text-sm text-amber-800">{refreshWarning}</p>
+      ) : null}
+      {notice ? <p className="text-sm text-zinc-800">{notice}</p> : null}
+      {error ? <p className="text-sm text-red-800">{error}</p> : null}
+
+      {payload == null && !error ? (
         <p className="text-sm text-zinc-600">
           {pending ? "Loading…" : "No ownership review loaded."}
         </p>
-      ) : payload.items.length === 0 ? (
+      ) : payload != null && payload.items.length === 0 ? (
         <p className="text-sm text-zinc-600">No active findings.</p>
-      ) : (
+      ) : payload != null ? (
         <ul className="divide-y divide-zinc-200 border-t border-zinc-200">
           {payload.items.map((item) => {
             const selected = item.finding_id === selectedFindingId;
@@ -148,18 +219,35 @@ export function FindingOwnershipReviewPanel({
                     </div>
                   </dl>
                 </div>
-                <button
-                  type="button"
-                  className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm"
-                  onClick={() => onOpenFinding(item.finding_id)}
-                >
-                  Open finding
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm"
+                    onClick={() => {
+                      setAssignGeneration((value) => value + 1);
+                      setAssignIntent({
+                        findingId: item.finding_id,
+                        title: item.title,
+                        targetLabel: item.target_label,
+                        assignmentState: item.assignment_state,
+                      });
+                    }}
+                  >
+                    {ACTION_LABELS[item.assignment_state]}
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm"
+                    onClick={() => onOpenFinding(item.finding_id)}
+                  >
+                    Open finding
+                  </button>
+                </div>
               </li>
             );
           })}
         </ul>
-      )}
+      ) : null}
 
       {payload?.next_cursor ? (
         <button
@@ -170,6 +258,17 @@ export function FindingOwnershipReviewPanel({
         >
           Next page
         </button>
+      ) : null}
+
+      {assignIntent ? (
+        <FindingOwnershipAssignModal
+          key={assignGeneration}
+          intent={assignIntent}
+          onClose={() => setAssignIntent(null)}
+          onWriteSucceeded={handleWriteSucceeded}
+          onAlreadyOwner={handleAlreadyOwner}
+          onResolvedConflict={handleResolvedConflict}
+        />
       ) : null}
     </section>
   );
