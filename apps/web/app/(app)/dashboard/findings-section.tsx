@@ -9,13 +9,14 @@ import { FindingsPanel } from "./findings-panel";
 type Props = {
   enabled: boolean;
   isAdmin: boolean;
+  organizationId: string | null;
 };
 
 /**
  * Owns the finding selection shared between the organization-scoped inbox,
  * admin ownership review, and the single-finding detail panel (M33).
  */
-export function FindingsSection({ enabled, isAdmin }: Props) {
+export function FindingsSection({ enabled, isAdmin, organizationId }: Props) {
   const [selectedFindingId, setSelectedFindingId] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
 
@@ -31,11 +32,13 @@ export function FindingsSection({ enabled, isAdmin }: Props) {
         <>
           <FindingOwnershipReviewPanel
             enabled={enabled}
+            organizationId={organizationId}
             selectedFindingId={selectedFindingId}
             onOpenFinding={setSelectedFindingId}
           />
           <FindingFollowUpReviewPanel
             enabled={enabled}
+            organizationId={organizationId}
             selectedFindingId={selectedFindingId}
             onOpenFinding={setSelectedFindingId}
           />

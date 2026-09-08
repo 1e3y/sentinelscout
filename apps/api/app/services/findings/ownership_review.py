@@ -10,6 +10,7 @@ from __future__ import annotations
 import binascii
 import logging
 from base64 import urlsafe_b64decode, urlsafe_b64encode
+from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
@@ -28,15 +29,32 @@ from app.schemas.finding_ownership_review import (
     FindingOwnershipReviewResponse,
 )
 from app.services.clerk import ClerkDirectory, FindingOwnershipPresenceUnavailable
+from app.services.findings.review_filters import (
+    OMITTED_FILTER_TOKEN,
+    ReviewDimensionFilters,
+    apply_review_dimension_filters,
+    normalize_review_filters,
+    parse_filter_token,
+)
 
 logger = logging.getLogger("scout.finding_ownership_review")
 
 DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 100
-CURSOR_VERSION = "v1"
+CURSOR_VERSION_V1 = "v1"
+CURSOR_VERSION = "v2"
 INVALID_CURSOR_DETAIL = "Invalid finding ownership review cursor"
 UNAVAILABLE_DETAIL = "Finding ownership could not be verified."
 OPEN_STATUS_LIST = sorted(OPEN_FINDING_STATUSES)
+
+
+@dataclass(frozen=True)
+class OwnershipReviewCursor:
+    target_token: str
+    severity_token: str
+    status_token: str
+    created_at: datetime
+    finding_id: UUID
 
 
 def raise_ownership_unavailable() -> None:
@@ -46,17 +64,38 @@ def raise_ownership_unavailable() -> None:
     )
 
 
-def encode_ownership_review_cursor(*, created_at: datetime, finding_id: UUID) -> str:
-    payload = f"{CURSOR_VERSION}|{created_at.isoformat()}|{finding_id}"
+def _invalid_cursor() -> None:
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=INVALID_CURSOR_DETAIL,
+    )
+
+
+def encode_ownership_review_cursor(
+    *,
+    created_at: datetime,
+    finding_id: UUID,
+    filters: ReviewDimensionFilters | None = None,
+) -> str:
+    bound = filters or normalize_review_filters(
+        target_id=None, severity=None, status=None
+    )
+    payload = "|".join(
+        (
+            CURSOR_VERSION,
+            bound.target_token,
+            bound.severity_token,
+            bound.status_token,
+            created_at.isoformat(),
+            str(finding_id),
+        )
+    )
     return urlsafe_b64encode(payload.encode("utf-8")).decode("ascii").rstrip("=")
 
 
-def decode_ownership_review_cursor(raw: str) -> tuple[datetime, UUID]:
+def decode_ownership_review_cursor(raw: str) -> OwnershipReviewCursor:
     if not raw or not raw.strip():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=INVALID_CURSOR_DETAIL,
-        )
+        _invalid_cursor()
     padded = raw + ("=" * (-len(raw) % 4))
     try:
         decoded = urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")
@@ -66,25 +105,50 @@ def decode_ownership_review_cursor(raw: str) -> tuple[datetime, UUID]:
             detail=INVALID_CURSOR_DETAIL,
         ) from exc
     parts = decoded.split("|")
-    if len(parts) != 3 or parts[0] != CURSOR_VERSION:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=INVALID_CURSOR_DETAIL,
-        )
+    if parts and parts[0] == CURSOR_VERSION_V1 and len(parts) == 3:
+        created_raw, finding_raw = parts[1], parts[2]
+        target_token = severity_token = status_token = OMITTED_FILTER_TOKEN
+    elif parts and parts[0] == CURSOR_VERSION and len(parts) == 6:
+        target_token, severity_token, status_token, created_raw, finding_raw = parts[1:]
+    else:
+        _invalid_cursor()
     try:
-        created_at = datetime.fromisoformat(parts[1])
-        finding_id = UUID(parts[2])
+        created_at = datetime.fromisoformat(created_raw)
+        finding_id = UUID(finding_raw)
+        target_token = parse_filter_token(target_token, kind="target")
+        severity_token = parse_filter_token(severity_token, kind="severity")
+        status_token = parse_filter_token(status_token, kind="status")
     except (TypeError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=INVALID_CURSOR_DETAIL,
         ) from exc
     if created_at.tzinfo is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=INVALID_CURSOR_DETAIL,
-        )
-    return created_at, finding_id
+        _invalid_cursor()
+    return OwnershipReviewCursor(
+        target_token=target_token,
+        severity_token=severity_token,
+        status_token=status_token,
+        created_at=created_at,
+        finding_id=finding_id,
+    )
+
+
+def resolve_ownership_review_cursor(
+    cursor: str | None,
+    *,
+    filters: ReviewDimensionFilters,
+) -> tuple[datetime | None, UUID | None]:
+    if cursor is None:
+        return None, None
+    decoded = decode_ownership_review_cursor(cursor)
+    if (
+        decoded.target_token != filters.target_token
+        or decoded.severity_token != filters.severity_token
+        or decoded.status_token != filters.status_token
+    ):
+        _invalid_cursor()
+    return decoded.created_at, decoded.finding_id
 
 
 def list_finding_ownership_review(
@@ -94,11 +158,23 @@ def list_finding_ownership_review(
     directory: ClerkDirectory,
     page_size: int = DEFAULT_PAGE_SIZE,
     cursor: str | None = None,
+    target_id: UUID | None = None,
+    severity: str | None = None,
+    status: str | None = None,
+    cursor_created_at: datetime | None = None,
+    cursor_finding_id: UUID | None = None,
 ) -> FindingOwnershipReviewResponse:
     if not organization.clerk_org_id or not organization.clerk_org_id.strip():
         raise_ownership_unavailable()
 
     size = min(max(page_size, 1), MAX_PAGE_SIZE)
+    filters = normalize_review_filters(
+        target_id=target_id, severity=severity, status=status
+    )
+    if cursor is not None and cursor_created_at is None:
+        cursor_created_at, cursor_finding_id = resolve_ownership_review_cursor(
+            cursor, filters=filters
+        )
     stmt = (
         select(
             Finding.id.label("finding_id"),
@@ -118,20 +194,19 @@ def list_finding_ownership_review(
             AuthorizedTarget.organization_id == organization.id,
             Finding.status.in_(OPEN_STATUS_LIST),
         )
-        .order_by(Finding.created_at.desc(), Finding.id.desc())
-        .limit(size + 1)
     )
-    if cursor:
-        cursor_created_at, cursor_id = decode_ownership_review_cursor(cursor)
+    stmt = apply_review_dimension_filters(stmt, filters)
+    if cursor_created_at is not None and cursor_finding_id is not None:
         stmt = stmt.where(
             or_(
                 Finding.created_at < cursor_created_at,
                 and_(
                     Finding.created_at == cursor_created_at,
-                    Finding.id < cursor_id,
+                    Finding.id < cursor_finding_id,
                 ),
             )
         )
+    stmt = stmt.order_by(Finding.created_at.desc(), Finding.id.desc()).limit(size + 1)
 
     rows = list(db.execute(stmt).all())
     has_more = len(rows) > size
@@ -217,6 +292,7 @@ def list_finding_ownership_review(
         next_cursor = encode_ownership_review_cursor(
             created_at=last.created_at,
             finding_id=last.finding_id,
+            filters=filters,
         )
 
     return FindingOwnershipReviewResponse(items=items, next_cursor=next_cursor)

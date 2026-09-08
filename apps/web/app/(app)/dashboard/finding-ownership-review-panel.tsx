@@ -2,20 +2,28 @@
 
 import { useAuth } from "@clerk/nextjs";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
-import {
-  FindingOwnershipAssignModal,
-  type OwnershipAssignIntent,
-} from "./finding-ownership-assign-modal";
+import { FindingOwnershipAssignModal, type OwnershipAssignIntent } from "./finding-ownership-assign-modal";
+import { FindingReviewFilters } from "./finding-review-filters";
 import {
   fetchFindingOwnershipReview,
+  fetchTargets,
   type FindingOwnershipAssignmentState,
   type FindingOwnershipReviewItem,
   type FindingOwnershipReviewResponse,
+  type FindingReviewSeverity,
+  type FindingReviewStatus,
+  type TargetResponse,
 } from "@/lib/api";
 import { organizationMemberLabel } from "@/lib/organization-member-label";
+import {
+  ownershipRefreshCursor,
+  shouldApplyReviewResult,
+  type OwnershipReviewRequestSnapshot,
+} from "@/lib/review-request-snapshot";
 
 type Props = {
   enabled: boolean;
+  organizationId: string | null;
   selectedFindingId: string | null;
   onOpenFinding: (findingId: string) => void;
 };
@@ -44,8 +52,15 @@ function assigneeLabel(item: FindingOwnershipReviewItem): string {
   return organizationMemberLabel(item.assignee.display_name);
 }
 
+function emptyCopy(filtered: boolean): string {
+  return filtered
+    ? "No findings match the selected filters."
+    : "No active findings.";
+}
+
 export function FindingOwnershipReviewPanel({
   enabled,
+  organizationId,
   selectedFindingId,
   onOpenFinding,
 }: Props) {
@@ -62,17 +77,94 @@ export function FindingOwnershipReviewPanel({
     null,
   );
   const [assignGeneration, setAssignGeneration] = useState(0);
+  const [targetId, setTargetId] = useState("");
+  const [severity, setSeverity] = useState("");
+  const [status, setStatus] = useState("");
+  const [appliedOrgId, setAppliedOrgId] = useState(organizationId);
+  const [targets, setTargets] = useState<TargetResponse[]>([]);
+  const [targetsLoading, setTargetsLoading] = useState(false);
+  const [targetsError, setTargetsError] = useState<string | null>(null);
+
+  const generationRef = useRef(0);
   const pageCursorRef = useRef<string | null>(null);
+  const nextInFlightRef = useRef<string | null>(null);
+  const latestRequestRef = useRef<OwnershipReviewRequestSnapshot | null>(null);
+  const mountedRef = useRef(true);
+  const targetGenerationRef = useRef(0);
+  const openedPageRef = useRef<OwnershipReviewRequestSnapshot | null>(null);
+  const viewRef = useRef<OwnershipReviewRequestSnapshot>({
+    organizationId,
+    targetId: null,
+    severity: null,
+    status: null,
+    cursor: null,
+    generation: 0,
+  });
+
+  if (appliedOrgId !== organizationId) {
+    setAppliedOrgId(organizationId);
+    setTargetId("");
+    setTargets([]);
+    setTargetsError(null);
+  }
+
+  const currentSnapshot = useCallback(
+    (cursor: string | null): OwnershipReviewRequestSnapshot => ({
+      organizationId,
+      targetId: targetId || null,
+      severity: (severity || null) as FindingReviewSeverity | null,
+      status: (status || null) as FindingReviewStatus | null,
+      cursor,
+      generation: generationRef.current,
+    }),
+    [organizationId, targetId, severity, status],
+  );
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    viewRef.current = currentSnapshot(pageCursorRef.current);
+  }, [currentSnapshot]);
+
+  const applyIfCurrent = useCallback(
+    (request: OwnershipReviewRequestSnapshot, next: FindingOwnershipReviewResponse) => {
+      const live = currentSnapshot(pageCursorRef.current);
+      live.generation = generationRef.current;
+      if (
+        !shouldApplyReviewResult({
+          mounted: mountedRef.current,
+          latest: latestRequestRef.current,
+          live,
+          request,
+        })
+      ) {
+        return false;
+      }
+      pageCursorRef.current = request.cursor;
+      viewRef.current = currentSnapshot(request.cursor);
+      setPayload(next);
+      return true;
+    },
+    [currentSnapshot],
+  );
 
   const fetchPage = useCallback(
-    async (cursor: string | null) => {
+    async (request: OwnershipReviewRequestSnapshot) => {
       const token = await getToken();
       if (!token) {
         throw new Error("Missing session token");
       }
       return fetchFindingOwnershipReview(token, {
         page_size: PAGE_SIZE,
-        cursor,
+        cursor: request.cursor,
+        target_id: request.targetId,
+        severity: request.severity as FindingReviewSeverity | null,
+        status: request.status as FindingReviewStatus | null,
       });
     },
     [getToken],
@@ -80,33 +172,103 @@ export function FindingOwnershipReviewPanel({
 
   const load = useCallback(
     (cursor: string | null) => {
-      if (!enabled) return;
+      if (!enabled || !organizationId) return;
+      const request = currentSnapshot(cursor);
+      if (cursor) {
+        if (nextInFlightRef.current) return;
+        nextInFlightRef.current = cursor;
+      }
+      latestRequestRef.current = request;
+      viewRef.current = request;
       startTransition(async () => {
         setError(null);
         try {
-          const next = await fetchPage(cursor);
-          pageCursorRef.current = cursor;
-          setPayload(next);
+          const next = await fetchPage(request);
+          if (applyIfCurrent(request, next)) {
+            setError(null);
+          }
         } catch (err) {
+          const live = currentSnapshot(pageCursorRef.current);
+          live.generation = generationRef.current;
+          if (
+            !shouldApplyReviewResult({
+              mounted: mountedRef.current,
+              latest: latestRequestRef.current,
+              live,
+              request,
+            })
+          ) {
+            return;
+          }
           setError(
             err instanceof Error
               ? err.message
               : "Finding ownership could not be verified.",
           );
+        } finally {
+          if (nextInFlightRef.current === cursor) {
+            nextInFlightRef.current = null;
+          }
         }
       });
     },
-    [enabled, fetchPage],
+    [applyIfCurrent, currentSnapshot, enabled, fetchPage, organizationId],
   );
 
-  const refreshCurrentPage = useCallback(async () => {
-    const next = await fetchPage(pageCursorRef.current);
-    setPayload(next);
-  }, [fetchPage]);
+  useEffect(() => {
+    generationRef.current += 1;
+    pageCursorRef.current = null;
+    nextInFlightRef.current = null;
+    latestRequestRef.current = null;
+    viewRef.current = currentSnapshot(null);
+    load(null);
+  }, [currentSnapshot, load, organizationId, targetId, severity, status]);
 
   useEffect(() => {
-    load(null);
-  }, [load]);
+    if (!enabled || !organizationId) return;
+    const generation = targetGenerationRef.current + 1;
+    targetGenerationRef.current = generation;
+    const org = organizationId;
+    startTransition(async () => {
+      setTargetsLoading(true);
+      setTargetsError(null);
+      try {
+        const token = await getToken();
+        if (!token) throw new Error("Missing session token");
+        const rows = await fetchTargets(token);
+        if (targetGenerationRef.current !== generation) return;
+        if (viewRef.current.organizationId !== org) return;
+        setTargets(rows);
+      } catch {
+        if (targetGenerationRef.current !== generation) return;
+        if (viewRef.current.organizationId !== org) return;
+        setTargets([]);
+        setTargetsError("Targets could not be loaded.");
+      } finally {
+        if (targetGenerationRef.current === generation) {
+          setTargetsLoading(false);
+        }
+      }
+    });
+  }, [enabled, getToken, organizationId]);
+
+  const refreshAfterMutation = useCallback(async () => {
+    const opened = openedPageRef.current;
+    const live = viewRef.current;
+    const cursor = ownershipRefreshCursor(opened, live);
+    if (cursor == null) {
+      pageCursorRef.current = null;
+    }
+    const request = {
+      ...live,
+      cursor,
+      generation: generationRef.current,
+    };
+    latestRequestRef.current = request;
+    viewRef.current = request;
+    const next = await fetchPage(request);
+    applyIfCurrent(request, next);
+  }, [applyIfCurrent, fetchPage]);
 
   const handleWriteSucceeded = useCallback(async () => {
     setSuccess("Finding owner updated.");
@@ -114,13 +276,13 @@ export function FindingOwnershipReviewPanel({
     setNotice(null);
     setError(null);
     try {
-      await refreshCurrentPage();
+      await refreshAfterMutation();
     } catch {
       setRefreshWarning(
         "Assignment updated, but ownership review could not be refreshed.",
       );
     }
-  }, [refreshCurrentPage]);
+  }, [refreshAfterMutation]);
 
   const handleAlreadyOwner = useCallback(async () => {
     setSuccess(null);
@@ -128,22 +290,24 @@ export function FindingOwnershipReviewPanel({
     setNotice("The selected member is already the current owner.");
     setError(null);
     try {
-      await refreshCurrentPage();
+      await refreshAfterMutation();
     } catch {
       setError("Finding ownership could not be verified.");
     }
-  }, [refreshCurrentPage]);
+  }, [refreshAfterMutation]);
 
   const handleResolvedConflict = useCallback(() => {
     setSuccess(null);
     setRefreshWarning(null);
     setNotice(null);
-    void refreshCurrentPage().catch(() => {
+    void refreshAfterMutation().catch(() => {
       setError("Finding ownership could not be verified.");
     });
-  }, [refreshCurrentPage]);
+  }, [refreshAfterMutation]);
 
   if (!enabled) return null;
+
+  const filtered = Boolean(targetId || severity || status);
 
   return (
     <section className="space-y-3">
@@ -160,11 +324,29 @@ export function FindingOwnershipReviewPanel({
           type="button"
           disabled={pending}
           className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm disabled:opacity-50"
-          onClick={() => load(null)}
+          onClick={() => {
+            generationRef.current += 1;
+            pageCursorRef.current = null;
+            nextInFlightRef.current = null;
+            load(null);
+          }}
         >
           Refresh
         </button>
       </div>
+
+      <FindingReviewFilters
+        targetId={targetId}
+        severity={severity}
+        status={status}
+        targets={targets}
+        targetsLoading={targetsLoading}
+        targetsError={targetsError}
+        disabled={pending}
+        onTargetId={setTargetId}
+        onSeverity={setSeverity}
+        onStatus={setStatus}
+      />
 
       {success ? <p className="text-sm text-zinc-800">{success}</p> : null}
       {refreshWarning ? (
@@ -178,7 +360,7 @@ export function FindingOwnershipReviewPanel({
           {pending ? "Loading…" : "No ownership review loaded."}
         </p>
       ) : payload != null && payload.items.length === 0 ? (
-        <p className="text-sm text-zinc-600">No active findings.</p>
+        <p className="text-sm text-zinc-600">{emptyCopy(filtered)}</p>
       ) : payload != null ? (
         <ul className="divide-y divide-zinc-200 border-t border-zinc-200">
           {payload.items.map((item) => {
@@ -224,6 +406,7 @@ export function FindingOwnershipReviewPanel({
                     type="button"
                     className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm"
                     onClick={() => {
+                      openedPageRef.current = currentSnapshot(pageCursorRef.current);
                       setAssignGeneration((value) => value + 1);
                       setAssignIntent({
                         findingId: item.finding_id,

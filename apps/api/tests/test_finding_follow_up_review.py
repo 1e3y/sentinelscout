@@ -253,7 +253,7 @@ def test_continuation_reuses_evaluation_time_and_filter_binding(
     cursor = body["next_cursor"]
     assert cursor
     payload = _cursor_payload(cursor)
-    assert payload.startswith("v1|overdue|")
+    assert payload.startswith("v2|overdue|*|*|*|")
     assert "follow_up" not in payload
     decoded = decode_follow_up_review_cursor(cursor)
     assert decoded.due_filter == "overdue"

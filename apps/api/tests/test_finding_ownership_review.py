@@ -288,11 +288,14 @@ def test_order_created_at_desc_id_desc_cursor_omits_due_date(
     ]
     assert body["next_cursor"]
     payload = _cursor_payload(body["next_cursor"])
-    assert payload.startswith("v1|")
+    assert payload.startswith("v2|*|*|*|")
     assert "follow_up" not in payload
-    created_at, finding_id = decode_ownership_review_cursor(body["next_cursor"])
-    assert finding_id == rows[1].id
-    assert created_at == rows[1].created_at
+    decoded = decode_ownership_review_cursor(body["next_cursor"])
+    assert decoded.finding_id == rows[1].id
+    assert decoded.created_at == rows[1].created_at
+    assert decoded.target_token == "*"
+    assert decoded.severity_token == "*"
+    assert decoded.status_token == "*"
 
     later = _review(client, ctx["token"], page_size=2, cursor=body["next_cursor"])
     assert [item["finding_id"] for item in later.json()["items"]] == [str(rows[0].id)]

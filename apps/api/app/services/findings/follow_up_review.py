@@ -27,10 +27,18 @@ from app.schemas.finding_follow_up_review import (
     FindingFollowUpReviewItem,
     FindingFollowUpReviewResponse,
 )
+from app.services.findings.review_filters import (
+    OMITTED_FILTER_TOKEN,
+    ReviewDimensionFilters,
+    apply_review_dimension_filters,
+    normalize_review_filters,
+    parse_filter_token,
+)
 
 DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 100
-CURSOR_VERSION = "v1"
+CURSOR_VERSION_V1 = "v1"
+CURSOR_VERSION = "v2"
 INVALID_CURSOR_DETAIL = "Invalid finding follow-up review cursor"
 UNAVAILABLE_DETAIL = "Finding follow-up review could not be loaded."
 OPEN_STATUS_LIST = sorted(OPEN_FINDING_STATUSES)
@@ -43,6 +51,9 @@ CLOCK_SKEW_TOLERANCE = timedelta(seconds=5)
 @dataclass(frozen=True)
 class FollowUpReviewCursor:
     due_filter: str
+    target_token: str
+    severity_token: str
+    status_token: str
     evaluation_time: datetime
     created_at: datetime
     finding_id: UUID
@@ -112,11 +123,21 @@ def encode_follow_up_review_cursor(
     evaluation_time: datetime,
     created_at: datetime,
     finding_id: UUID,
+    filters: ReviewDimensionFilters | None = None,
+    target_id: UUID | None = None,
+    severity: str | None = None,
+    status: str | None = None,
 ) -> str:
+    bound = filters or normalize_review_filters(
+        target_id=target_id, severity=severity, status=status
+    )
     payload = "|".join(
         (
             CURSOR_VERSION,
             due_filter,
+            bound.target_token,
+            bound.severity_token,
+            bound.status_token,
             format_cursor_instant(evaluation_time),
             format_cursor_instant(created_at),
             str(finding_id),
@@ -134,17 +155,35 @@ def decode_follow_up_review_cursor(raw: str) -> FollowUpReviewCursor:
     except (binascii.Error, UnicodeDecodeError, ValueError):
         _invalid_cursor()
     parts = decoded.split("|")
-    if len(parts) != 5 or parts[0] != CURSOR_VERSION:
+    if parts and parts[0] == CURSOR_VERSION_V1 and len(parts) == 5:
+        due_filter, evaluation_raw, created_raw, finding_raw = parts[1:]
+        target_token = severity_token = status_token = OMITTED_FILTER_TOKEN
+    elif parts and parts[0] == CURSOR_VERSION and len(parts) == 8:
+        (
+            due_filter,
+            target_token,
+            severity_token,
+            status_token,
+            evaluation_raw,
+            created_raw,
+            finding_raw,
+        ) = parts[1:]
+    else:
         _invalid_cursor()
-    due_filter, evaluation_raw, created_raw, finding_raw = parts[1:]
     if due_filter not in CURSOR_DUE_FILTERS:
         _invalid_cursor()
     try:
         finding_id = UUID(finding_raw)
+        target_token = parse_filter_token(target_token, kind="target")
+        severity_token = parse_filter_token(severity_token, kind="severity")
+        status_token = parse_filter_token(status_token, kind="status")
     except (TypeError, ValueError):
         _invalid_cursor()
     return FollowUpReviewCursor(
         due_filter=due_filter,
+        target_token=target_token,
+        severity_token=severity_token,
+        status_token=status_token,
         evaluation_time=parse_cursor_instant(evaluation_raw),
         created_at=parse_cursor_instant(created_raw),
         finding_id=finding_id,
@@ -169,13 +208,26 @@ def resolve_follow_up_review_cursor(
     *,
     due_filter: str,
     request_now: datetime,
+    filters: ReviewDimensionFilters | None = None,
+    target_id: UUID | None = None,
+    severity: str | None = None,
+    status: str | None = None,
 ) -> tuple[datetime, datetime | None, UUID | None]:
     """Validate cursor/filter/age. Returns evaluation_time and keyset position."""
     request_now = canonicalize_cursor_instant(request_now)
+    bound = filters or normalize_review_filters(
+        target_id=target_id, severity=severity, status=status
+    )
     if cursor is None:
         return request_now, None, None
     decoded = decode_follow_up_review_cursor(cursor)
     if decoded.due_filter != due_filter:
+        _invalid_cursor()
+    if (
+        decoded.target_token != bound.target_token
+        or decoded.severity_token != bound.severity_token
+        or decoded.status_token != bound.status_token
+    ):
         _invalid_cursor()
     evaluation_time = validate_evaluation_snapshot(decoded.evaluation_time, request_now)
     return evaluation_time, decoded.created_at, decoded.finding_id
@@ -211,6 +263,9 @@ def list_finding_follow_up_review(
     page_size: int = DEFAULT_PAGE_SIZE,
     cursor_created_at: datetime | None = None,
     cursor_finding_id: UUID | None = None,
+    target_id: UUID | None = None,
+    severity: str | None = None,
+    status: str | None = None,
 ) -> FindingFollowUpReviewResponse:
     size = min(max(page_size, 1), MAX_PAGE_SIZE)
     moment = canonicalize_cursor_instant(evaluation_time)
@@ -233,9 +288,11 @@ def list_finding_follow_up_review(
             AuthorizedTarget.organization_id == organization.id,
             Finding.status.in_(OPEN_STATUS_LIST),
         )
-        .order_by(Finding.created_at.desc(), Finding.id.desc())
-        .limit(size + 1)
     )
+    filters = normalize_review_filters(
+        target_id=target_id, severity=severity, status=status
+    )
+    stmt = apply_review_dimension_filters(stmt, filters)
     due_clause = _due_predicate(due_filter, moment)
     if due_clause is not None:
         stmt = stmt.where(due_clause)
@@ -250,6 +307,7 @@ def list_finding_follow_up_review(
                 ),
             )
         )
+    stmt = stmt.order_by(Finding.created_at.desc(), Finding.id.desc()).limit(size + 1)
 
     raw_rows = list(db.execute(stmt).all())
     has_more = len(raw_rows) > size
@@ -316,6 +374,7 @@ def list_finding_follow_up_review(
             evaluation_time=moment,
             created_at=last.created_at,
             finding_id=last.finding_id,
+            filters=filters,
         )
 
     return FindingFollowUpReviewResponse(

@@ -6,17 +6,27 @@ import {
   FindingFollowUpDueModal,
   type DueDateIntent,
 } from "./finding-follow-up-due-modal";
+import { FindingReviewFilters } from "./finding-review-filters";
 import { parseApiError } from "@/lib/api-error";
 import {
   fetchFindingFollowUpReview,
+  fetchTargets,
   type FindingFollowUpDueState,
   type FindingFollowUpReviewItem,
   type FindingFollowUpReviewResponse,
+  type FindingReviewSeverity,
+  type FindingReviewStatus,
+  type TargetResponse,
 } from "@/lib/api";
 import { organizationMemberLabel } from "@/lib/organization-member-label";
+import {
+  shouldApplyReviewResult,
+  type FollowUpReviewRequestSnapshot,
+} from "@/lib/review-request-snapshot";
 
 type Props = {
   enabled: boolean;
+  organizationId: string | null;
   selectedFindingId: string | null;
   onOpenFinding: (findingId: string) => void;
 };
@@ -59,8 +69,15 @@ function assigneeLabel(item: FindingFollowUpReviewItem): string {
   return organizationMemberLabel(item.assignee.display_name);
 }
 
+function emptyCopy(filtered: boolean): string {
+  return filtered
+    ? "No active findings match the selected follow-up filters."
+    : "No matching findings.";
+}
+
 export function FindingFollowUpReviewPanel({
   enabled,
+  organizationId,
   selectedFindingId,
   onOpenFinding,
 }: Props) {
@@ -74,38 +91,138 @@ export function FindingFollowUpReviewPanel({
   const [notice, setNotice] = useState<string | null>(null);
   const [currentDueNotice, setCurrentDueNotice] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterValue>("all");
+  const [targetId, setTargetId] = useState("");
+  const [severity, setSeverity] = useState("");
+  const [status, setStatus] = useState("");
+  const [appliedOrgId, setAppliedOrgId] = useState(organizationId);
+  const [targets, setTargets] = useState<TargetResponse[]>([]);
+  const [targetsLoading, setTargetsLoading] = useState(false);
+  const [targetsError, setTargetsError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [dueIntent, setDueIntent] = useState<DueDateIntent | null>(null);
   const [dueGeneration, setDueGeneration] = useState(0);
+
+  const generationRef = useRef(0);
   const pageCursorRef = useRef<string | null>(null);
+  const nextInFlightRef = useRef<string | null>(null);
+  const latestRequestRef = useRef<FollowUpReviewRequestSnapshot | null>(null);
+  const mountedRef = useRef(true);
+  const targetGenerationRef = useRef(0);
   const recoveringCursorRef = useRef(false);
+  const viewRef = useRef<FollowUpReviewRequestSnapshot>({
+    organizationId,
+    targetId: null,
+    severity: null,
+    status: null,
+    cursor: null,
+    generation: 0,
+    dueState: null,
+  });
+
+  if (appliedOrgId !== organizationId) {
+    setAppliedOrgId(organizationId);
+    setTargetId("");
+    setTargets([]);
+    setTargetsError(null);
+  }
+
+  const currentSnapshot = useCallback(
+    (cursor: string | null): FollowUpReviewRequestSnapshot => ({
+      organizationId,
+      targetId: targetId || null,
+      severity: (severity || null) as FindingReviewSeverity | null,
+      status: (status || null) as FindingReviewStatus | null,
+      cursor,
+      generation: generationRef.current,
+      dueState: filter === "all" ? null : filter,
+    }),
+    [filter, organizationId, severity, status, targetId],
+  );
+
+  const loadRef = useRef<(cursor: string | null) => void>(() => {});
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    viewRef.current = currentSnapshot(pageCursorRef.current);
+  }, [currentSnapshot]);
+
+  const applyIfCurrent = useCallback(
+    (request: FollowUpReviewRequestSnapshot, next: FindingFollowUpReviewResponse) => {
+      const live = currentSnapshot(pageCursorRef.current);
+      live.generation = generationRef.current;
+      if (
+        !shouldApplyReviewResult({
+          mounted: mountedRef.current,
+          latest: latestRequestRef.current,
+          live,
+          request,
+        })
+      ) {
+        return false;
+      }
+      pageCursorRef.current = request.cursor;
+      recoveringCursorRef.current = false;
+      viewRef.current = currentSnapshot(request.cursor);
+      setPayload(next);
+      return true;
+    },
+    [currentSnapshot],
+  );
 
   const fetchPage = useCallback(
-    async (cursor: string | null, dueFilter: FilterValue) => {
+    async (request: FollowUpReviewRequestSnapshot) => {
       const token = await getToken();
       if (!token) {
         throw new Error("Missing session token");
       }
       return fetchFindingFollowUpReview(token, {
         page_size: PAGE_SIZE,
-        cursor,
-        ...(dueFilter === "all" ? {} : { due_state: dueFilter }),
+        cursor: request.cursor,
+        target_id: request.targetId,
+        severity: request.severity as FindingReviewSeverity | null,
+        status: request.status as FindingReviewStatus | null,
+        ...(request.dueState
+          ? { due_state: request.dueState as FindingFollowUpDueState }
+          : {}),
       });
     },
     [getToken],
   );
 
   const load = useCallback(
-    (cursor: string | null, dueFilter: FilterValue) => {
-      if (!enabled) return;
+    (cursor: string | null) => {
+      if (!enabled || !organizationId) return;
+      const request = currentSnapshot(cursor);
+      if (cursor) {
+        if (nextInFlightRef.current) return;
+        nextInFlightRef.current = cursor;
+      }
+      latestRequestRef.current = request;
+      viewRef.current = request;
       startTransition(async () => {
         setError(null);
         try {
-          const next = await fetchPage(cursor, dueFilter);
-          pageCursorRef.current = cursor;
-          recoveringCursorRef.current = false;
-          setPayload(next);
+          const next = await fetchPage(request);
+          applyIfCurrent(request, next);
         } catch (err) {
+          const live = currentSnapshot(pageCursorRef.current);
+          live.generation = generationRef.current;
+          if (
+            !shouldApplyReviewResult({
+              mounted: mountedRef.current,
+              latest: latestRequestRef.current,
+              live,
+              request,
+            })
+          ) {
+            return;
+          }
           const parsed = parseApiError(
             err,
             "Finding follow-up review could not be loaded.",
@@ -118,44 +235,76 @@ export function FindingFollowUpReviewPanel({
           ) {
             recoveringCursorRef.current = true;
             pageCursorRef.current = null;
-            try {
-              const fresh = await fetchPage(null, dueFilter);
-              setPayload(fresh);
-              setError(null);
-              return;
-            } catch (refreshErr) {
-              setPayload(null);
-              setError(
-                parseApiError(
-                  refreshErr,
-                  "Finding follow-up review could not be loaded.",
-                ).message,
-              );
-              return;
-            }
+            generationRef.current += 1;
+            loadRef.current(null);
+            return;
           }
           setError(parsed.message);
+        } finally {
+          if (nextInFlightRef.current === cursor) {
+            nextInFlightRef.current = null;
+          }
         }
       });
     },
-    [enabled, fetchPage],
+    [applyIfCurrent, currentSnapshot, enabled, fetchPage, organizationId],
   );
 
-  const refreshFirstPage = useCallback(async () => {
-    pageCursorRef.current = null;
-    const next = await fetchPage(null, filter);
-    setPayload(next);
-  }, [fetchPage, filter]);
+  useEffect(() => {
+    loadRef.current = load;
+  }, [load]);
 
   useEffect(() => {
-    load(null, filter);
-  }, [load, filter]);
-
-  function changeFilter(next: FilterValue) {
+    generationRef.current += 1;
     pageCursorRef.current = null;
-    setPayload(null);
-    setFilter(next);
-  }
+    nextInFlightRef.current = null;
+    latestRequestRef.current = null;
+    recoveringCursorRef.current = false;
+    viewRef.current = currentSnapshot(null);
+    load(null);
+  }, [currentSnapshot, load, organizationId, targetId, severity, status, filter]);
+
+  useEffect(() => {
+    if (!enabled || !organizationId) return;
+    const generation = targetGenerationRef.current + 1;
+    targetGenerationRef.current = generation;
+    const org = organizationId;
+    startTransition(async () => {
+      setTargetsLoading(true);
+      setTargetsError(null);
+      try {
+        const token = await getToken();
+        if (!token) throw new Error("Missing session token");
+        const rows = await fetchTargets(token);
+        if (targetGenerationRef.current !== generation) return;
+        if (viewRef.current.organizationId !== org) return;
+        setTargets(rows);
+      } catch {
+        if (targetGenerationRef.current !== generation) return;
+        if (viewRef.current.organizationId !== org) return;
+        setTargets([]);
+        setTargetsError("Targets could not be loaded.");
+      } finally {
+        if (targetGenerationRef.current === generation) {
+          setTargetsLoading(false);
+        }
+      }
+    });
+  }, [enabled, getToken, organizationId]);
+
+  const refreshFirstPageCurrent = useCallback(async () => {
+    pageCursorRef.current = null;
+    nextInFlightRef.current = null;
+    const request = {
+      ...viewRef.current,
+      cursor: null,
+      generation: generationRef.current,
+    };
+    latestRequestRef.current = request;
+    viewRef.current = request;
+    const next = await fetchPage(request);
+    applyIfCurrent(request, next);
+  }, [applyIfCurrent, fetchPage]);
 
   const handleWriteSucceeded = useCallback(async () => {
     setSuccess("Follow-up due date updated.");
@@ -164,13 +313,13 @@ export function FindingFollowUpReviewPanel({
     setCurrentDueNotice(null);
     setError(null);
     try {
-      await refreshFirstPage();
+      await refreshFirstPageCurrent();
     } catch {
       setRefreshWarning(
         "Due date updated, but the follow-up review could not be refreshed.",
       );
     }
-  }, [refreshFirstPage]);
+  }, [refreshFirstPageCurrent]);
 
   const handleAlreadyDue = useCallback(async () => {
     setSuccess(null);
@@ -179,21 +328,21 @@ export function FindingFollowUpReviewPanel({
     setCurrentDueNotice(null);
     setError(null);
     try {
-      await refreshFirstPage();
+      await refreshFirstPageCurrent();
     } catch {
       setError("Finding follow-up review could not be loaded.");
     }
-  }, [refreshFirstPage]);
+  }, [refreshFirstPageCurrent]);
 
   const handleResolvedConflict = useCallback(() => {
     setSuccess(null);
     setRefreshWarning(null);
     setNotice(null);
     setCurrentDueNotice(null);
-    void refreshFirstPage().catch(() => {
+    void refreshFirstPageCurrent().catch(() => {
       setError("Finding follow-up review could not be loaded.");
     });
-  }, [refreshFirstPage]);
+  }, [refreshFirstPageCurrent]);
 
   const handleTransportUncertain = useCallback(
     async (currentDueLabel: string | null) => {
@@ -209,15 +358,17 @@ export function FindingFollowUpReviewPanel({
           : null,
       );
       try {
-        await refreshFirstPage();
+        await refreshFirstPageCurrent();
       } catch {
         setError("Finding follow-up review could not be loaded.");
       }
     },
-    [refreshFirstPage],
+    [refreshFirstPageCurrent],
   );
 
   if (!enabled) return null;
+
+  const filtered = Boolean(targetId || severity || status || filter !== "all");
 
   return (
     <section className="space-y-3">
@@ -235,8 +386,10 @@ export function FindingFollowUpReviewPanel({
           disabled={pending}
           className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm disabled:opacity-50"
           onClick={() => {
+            generationRef.current += 1;
             pageCursorRef.current = null;
-            load(null, filter);
+            nextInFlightRef.current = null;
+            load(null);
           }}
         >
           Refresh
@@ -263,19 +416,32 @@ export function FindingFollowUpReviewPanel({
                 ? "border-zinc-900 bg-zinc-900 text-white"
                 : "border-zinc-300"
             }`}
-            onClick={() => changeFilter(option.value)}
+            onClick={() => setFilter(option.value)}
           >
             {option.label}
           </button>
         ))}
       </div>
 
+      <FindingReviewFilters
+        targetId={targetId}
+        severity={severity}
+        status={status}
+        targets={targets}
+        targetsLoading={targetsLoading}
+        targetsError={targetsError}
+        disabled={pending}
+        onTargetId={setTargetId}
+        onSeverity={setSeverity}
+        onStatus={setStatus}
+      />
+
       {payload == null && !error ? (
         <p className="text-sm text-zinc-600">
           {pending ? "Loading…" : "No follow-up review loaded."}
         </p>
       ) : payload != null && payload.items.length === 0 ? (
-        <p className="text-sm text-zinc-600">No matching findings.</p>
+        <p className="text-sm text-zinc-600">{emptyCopy(filtered)}</p>
       ) : payload != null ? (
         <ul className="divide-y divide-zinc-200 border-t border-zinc-200">
           {payload.items.map((item) => {
@@ -347,7 +513,7 @@ export function FindingFollowUpReviewPanel({
           type="button"
           disabled={pending}
           className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm disabled:opacity-50"
-          onClick={() => load(payload.next_cursor, filter)}
+          onClick={() => load(payload.next_cursor)}
         >
           Next page
         </button>

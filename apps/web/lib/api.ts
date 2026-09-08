@@ -1453,13 +1453,39 @@ export type FindingOwnershipReviewResponse = {
   next_cursor: string | null;
 };
 
-export function fetchFindingOwnershipReview(
-  token: string,
-  options: { page_size?: number; cursor?: string | null } = {},
-): Promise<FindingOwnershipReviewResponse> {
-  const params = new URLSearchParams();
+export type FindingReviewSeverity =
+  | "informational"
+  | "low"
+  | "medium"
+  | "high"
+  | "critical";
+export type FindingReviewStatus = "open" | "in_progress" | "ready_for_retest";
+
+export type FindingReviewQuery = {
+  page_size?: number;
+  cursor?: string | null;
+  target_id?: string | null;
+  severity?: FindingReviewSeverity | null;
+  status?: FindingReviewStatus | null;
+};
+
+function appendReviewFilters(
+  params: URLSearchParams,
+  options: FindingReviewQuery,
+): void {
   if (options.page_size != null) params.set("page_size", String(options.page_size));
   if (options.cursor) params.set("cursor", options.cursor);
+  if (options.target_id) params.set("target_id", options.target_id);
+  if (options.severity) params.set("severity", options.severity);
+  if (options.status) params.set("status", options.status);
+}
+
+export function fetchFindingOwnershipReview(
+  token: string,
+  options: FindingReviewQuery = {},
+): Promise<FindingOwnershipReviewResponse> {
+  const params = new URLSearchParams();
+  appendReviewFilters(params, options);
   const query = params.toString();
   return apiFetch<FindingOwnershipReviewResponse>(
     `/v1/findings/ownership-review${query ? `?${query}` : ""}`,
@@ -1495,15 +1521,10 @@ export type FindingFollowUpReviewResponse = {
 
 export function fetchFindingFollowUpReview(
   token: string,
-  options: {
-    page_size?: number;
-    cursor?: string | null;
-    due_state?: FindingFollowUpDueState;
-  } = {},
+  options: FindingReviewQuery & { due_state?: FindingFollowUpDueState } = {},
 ): Promise<FindingFollowUpReviewResponse> {
   const params = new URLSearchParams();
-  if (options.page_size != null) params.set("page_size", String(options.page_size));
-  if (options.cursor) params.set("cursor", options.cursor);
+  appendReviewFilters(params, options);
   if (options.due_state) params.set("due_state", options.due_state);
   const query = params.toString();
   return apiFetch<FindingFollowUpReviewResponse>(

@@ -27,7 +27,11 @@ from app.schemas.finding_follow_up_reminder_status import (
     FindingFollowUpReminderStatusResponse,
 )
 from app.schemas.finding_follow_up_review import FindingFollowUpReviewResponse
-from app.schemas.finding_ownership_review import FindingOwnershipReviewResponse
+from app.schemas.finding_ownership_review import (
+    ActiveFindingStatus,
+    FindingOwnershipReviewResponse,
+    FindingSeverity,
+)
 from app.schemas.finding_remediation import (
     CreateFindingRemediationRevisionRequest,
     FindingRemediationHistoryResponse,
@@ -72,9 +76,10 @@ from app.services.findings.follow_up_review import (
 from app.services.findings.ownership_review import DEFAULT_PAGE_SIZE as OWNERSHIP_DEFAULT_PAGE_SIZE
 from app.services.findings.ownership_review import MAX_PAGE_SIZE as OWNERSHIP_MAX_PAGE_SIZE
 from app.services.findings.ownership_review import (
-    decode_ownership_review_cursor,
     list_finding_ownership_review,
+    resolve_ownership_review_cursor,
 )
+from app.services.findings.review_filters import normalize_review_filters
 from app.services.findings.remediation_record import (
     DEFAULT_REMEDIATION_PAGE_SIZE,
     MAX_REMEDIATION_PAGE_SIZE,
@@ -227,6 +232,9 @@ def finding_ownership_review_endpoint(
         int, Query(ge=1, le=OWNERSHIP_MAX_PAGE_SIZE)
     ] = OWNERSHIP_DEFAULT_PAGE_SIZE,
     cursor: str | None = None,
+    target_id: UUID | None = None,
+    severity: Annotated[FindingSeverity | None, Query()] = None,
+    status: Annotated[ActiveFindingStatus | None, Query()] = None,
 ) -> FindingOwnershipReviewResponse:
     """Read-only review of active Finding ownership for the verified active org.
 
@@ -242,8 +250,12 @@ def finding_ownership_review_endpoint(
     organization, _membership, actor = require_org_admin(
         auth.active_organization.id, auth, db
     )
-    if cursor is not None:
-        decode_ownership_review_cursor(cursor)
+    filters = normalize_review_filters(
+        target_id=target_id, severity=severity, status=status
+    )
+    cursor_created_at, cursor_finding_id = resolve_ownership_review_cursor(
+        cursor, filters=filters
+    )
     enforce_rate_limit(
         db,
         organization_id=organization.id,
@@ -255,7 +267,11 @@ def finding_ownership_review_endpoint(
         organization=organization,
         directory=directory,
         page_size=page_size,
-        cursor=cursor,
+        target_id=filters.target_id,
+        severity=filters.severity,
+        status=filters.status,
+        cursor_created_at=cursor_created_at,
+        cursor_finding_id=cursor_finding_id,
     )
 
 
@@ -271,6 +287,9 @@ def finding_follow_up_review_endpoint(
     due_state: Annotated[
         Literal["no_due_date", "upcoming", "overdue"] | None, Query()
     ] = None,
+    target_id: UUID | None = None,
+    severity: Annotated[FindingSeverity | None, Query()] = None,
+    status: Annotated[ActiveFindingStatus | None, Query()] = None,
 ) -> FindingFollowUpReviewResponse:
     """Read-only due-date review of active Findings for the verified active org.
 
@@ -284,11 +303,15 @@ def finding_follow_up_review_endpoint(
     )
     request_now = datetime.now(timezone.utc)
     due_filter = normalize_due_filter(due_state)
+    filters = normalize_review_filters(
+        target_id=target_id, severity=severity, status=status
+    )
     evaluation_time, cursor_created_at, cursor_finding_id = (
         resolve_follow_up_review_cursor(
             cursor,
             due_filter=due_filter,
             request_now=request_now,
+            filters=filters,
         )
     )
     enforce_rate_limit(
@@ -305,6 +328,9 @@ def finding_follow_up_review_endpoint(
         page_size=page_size,
         cursor_created_at=cursor_created_at,
         cursor_finding_id=cursor_finding_id,
+        target_id=filters.target_id,
+        severity=filters.severity,
+        status=filters.status,
     )
 
 
