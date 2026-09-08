@@ -2055,17 +2055,48 @@ export function fetchOrganizationInvitationHistory(
   );
 }
 
+export type ExpectedFollowUpState = {
+  assigned_to_user_id: string | null;
+  follow_up_due_at: string | null;
+};
+
+export type UpdateFindingFollowUpRequest = {
+  assigned_to_user_id: string | null;
+  follow_up_due_at: string | null;
+};
+
+export type UpdateFindingFollowUpConditionalRequest = {
+  assigned_to_user_id: string | null;
+  follow_up_due_at: string | null;
+  expected_follow_up: ExpectedFollowUpState;
+};
+
 export function updateFindingFollowUp(
   token: string,
   findingId: string,
-  body: {
-    assigned_to_user_id: string | null;
-    follow_up_due_at: string | null;
-  },
+  body: UpdateFindingFollowUpRequest,
 ): Promise<FindingFollowUp> {
   return apiFetch<FindingFollowUp>(`/v1/findings/${findingId}/follow-up`, token, {
     method: "PUT",
     body: JSON.stringify(body),
+  });
+}
+
+export function updateFindingFollowUpConditionally(
+  token: string,
+  findingId: string,
+  body: UpdateFindingFollowUpConditionalRequest,
+): Promise<FindingFollowUp> {
+  return apiFetch<FindingFollowUp>(`/v1/findings/${findingId}/follow-up`, token, {
+    method: "PUT",
+    body: JSON.stringify({
+      assigned_to_user_id: body.assigned_to_user_id,
+      follow_up_due_at: body.follow_up_due_at,
+      expected_follow_up: {
+        assigned_to_user_id: body.expected_follow_up.assigned_to_user_id,
+        follow_up_due_at: body.expected_follow_up.follow_up_due_at,
+      },
+    }),
   });
 }
 

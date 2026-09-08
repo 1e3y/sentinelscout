@@ -15,7 +15,11 @@ from app.models.finding import Finding
 from app.models.finding_follow_up import FindingFollowUpChange
 from app.models.organization import Organization
 from app.models.user import User
-from app.schemas.finding_follow_up import FindingFollowUpResponse, FindingOwnerResponse
+from app.schemas.finding_follow_up import (
+    ExpectedFollowUpState,
+    FindingFollowUpResponse,
+    FindingOwnerResponse,
+)
 from app.services.audit import record_audit
 from app.services.authorization import AuthorizedOrgActor, assert_actor_org, merge_auth_audit
 from app.services.clerk import ClerkDirectory
@@ -23,6 +27,8 @@ from app.services.organization_members import (
     assert_assignable_org_member,
     clerk_user_is_org_member,
 )
+
+FOLLOW_UP_CHANGED_DETAIL = "Finding follow-up changed. Refresh and try again."
 
 
 def canonicalize_due_at(value: datetime | None) -> datetime | None:
@@ -123,6 +129,7 @@ def update_finding_follow_up(
     directory: ClerkDirectory,
     assigned_to_user_id: UUID | None,
     follow_up_due_at: datetime | None,
+    expected_follow_up: ExpectedFollowUpState | None = None,
 ) -> FollowUpMutationResult:
     locked = db.scalar(
         select(Finding).where(Finding.id == finding_id).with_for_update()
@@ -135,6 +142,19 @@ def update_finding_follow_up(
             status_code=status.HTTP_409_CONFLICT,
             detail="Resolved findings cannot change follow-up ownership or due date",
         )
+
+    if expected_follow_up is not None:
+        same_expected_owner = (
+            locked.assigned_to_user_id == expected_follow_up.assigned_to_user_id
+        )
+        same_expected_due = due_instants_equal(
+            locked.follow_up_due_at, expected_follow_up.follow_up_due_at
+        )
+        if not same_expected_owner or not same_expected_due:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=FOLLOW_UP_CHANGED_DETAIL,
+            )
 
     organization = db.get(Organization, locked.organization_id)
     if organization is None:

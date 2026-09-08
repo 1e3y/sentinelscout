@@ -347,6 +347,7 @@ def update_finding_follow_up_endpoint(
         directory=directory,
         assigned_to_user_id=body.assigned_to_user_id,
         follow_up_due_at=body.follow_up_due_at,
+        expected_follow_up=body.expected_follow_up,
     )
     return result.follow_up
 

@@ -25,3 +25,9 @@ export function parseApiError(err: unknown, fallback: string): ParsedApiError {
   }
   return { status, message: fallback };
 }
+
+export function isTransportAmbiguousError(err: unknown): boolean {
+  if (!(err instanceof Error)) return true;
+  if (err.message === "Missing session token") return false;
+  return !/failed \(\d+\):/.test(err.message);
+}

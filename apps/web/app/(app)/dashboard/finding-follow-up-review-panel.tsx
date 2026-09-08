@@ -2,6 +2,10 @@
 
 import { useAuth } from "@clerk/nextjs";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import {
+  FindingFollowUpDueModal,
+  type DueDateIntent,
+} from "./finding-follow-up-due-modal";
 import { parseApiError } from "@/lib/api-error";
 import {
   fetchFindingFollowUpReview,
@@ -28,6 +32,12 @@ const FILTERS: Array<{ value: FilterValue; label: string }> = [
   { value: "upcoming", label: "Upcoming" },
   { value: "overdue", label: "Overdue" },
 ];
+
+const DUE_ACTION_LABELS: Record<FindingFollowUpDueState, string> = {
+  no_due_date: "Set due date",
+  upcoming: "Change due date",
+  overdue: "Change due date",
+};
 
 function formatTime(value: string): string {
   return new Date(value).toLocaleString();
@@ -59,8 +69,14 @@ export function FindingFollowUpReviewPanel({
     null,
   );
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [refreshWarning, setRefreshWarning] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [currentDueNotice, setCurrentDueNotice] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterValue>("all");
   const [pending, startTransition] = useTransition();
+  const [dueIntent, setDueIntent] = useState<DueDateIntent | null>(null);
+  const [dueGeneration, setDueGeneration] = useState(0);
   const pageCursorRef = useRef<string | null>(null);
   const recoveringCursorRef = useRef(false);
 
@@ -125,6 +141,12 @@ export function FindingFollowUpReviewPanel({
     [enabled, fetchPage],
   );
 
+  const refreshFirstPage = useCallback(async () => {
+    pageCursorRef.current = null;
+    const next = await fetchPage(null, filter);
+    setPayload(next);
+  }, [fetchPage, filter]);
+
   useEffect(() => {
     load(null, filter);
   }, [load, filter]);
@@ -135,6 +157,66 @@ export function FindingFollowUpReviewPanel({
     setFilter(next);
   }
 
+  const handleWriteSucceeded = useCallback(async () => {
+    setSuccess("Follow-up due date updated.");
+    setRefreshWarning(null);
+    setNotice(null);
+    setCurrentDueNotice(null);
+    setError(null);
+    try {
+      await refreshFirstPage();
+    } catch {
+      setRefreshWarning(
+        "Due date updated, but the follow-up review could not be refreshed.",
+      );
+    }
+  }, [refreshFirstPage]);
+
+  const handleAlreadyDue = useCallback(async () => {
+    setSuccess(null);
+    setRefreshWarning(null);
+    setNotice("The follow-up due date is already set to this time.");
+    setCurrentDueNotice(null);
+    setError(null);
+    try {
+      await refreshFirstPage();
+    } catch {
+      setError("Finding follow-up review could not be loaded.");
+    }
+  }, [refreshFirstPage]);
+
+  const handleResolvedConflict = useCallback(() => {
+    setSuccess(null);
+    setRefreshWarning(null);
+    setNotice(null);
+    setCurrentDueNotice(null);
+    void refreshFirstPage().catch(() => {
+      setError("Finding follow-up review could not be loaded.");
+    });
+  }, [refreshFirstPage]);
+
+  const handleTransportUncertain = useCallback(
+    async (currentDueLabel: string | null) => {
+      setSuccess(null);
+      setRefreshWarning(null);
+      setError(null);
+      setNotice(
+        "We couldn't confirm whether the follow-up due date was updated. Refresh the finding before trying again.",
+      );
+      setCurrentDueNotice(
+        currentDueLabel
+          ? `Current follow-up due date: ${currentDueLabel}`
+          : null,
+      );
+      try {
+        await refreshFirstPage();
+      } catch {
+        setError("Finding follow-up review could not be loaded.");
+      }
+    },
+    [refreshFirstPage],
+  );
+
   if (!enabled) return null;
 
   return (
@@ -144,7 +226,8 @@ export function FindingFollowUpReviewPanel({
           <h2 className="text-lg font-medium">Finding follow-up review</h2>
           <p className="text-sm text-zinc-600">
             Active findings for this organization, classified by the stored
-            follow-up due date. Open a finding to change the due date.
+            follow-up due date. Set or change a due date here, or open the
+            finding for the full follow-up workflow.
           </p>
         </div>
         <button
@@ -159,6 +242,16 @@ export function FindingFollowUpReviewPanel({
           Refresh
         </button>
       </div>
+
+      {success ? <p className="text-sm text-zinc-800">{success}</p> : null}
+      {refreshWarning ? (
+        <p className="text-sm text-amber-800">{refreshWarning}</p>
+      ) : null}
+      {notice ? <p className="text-sm text-zinc-800">{notice}</p> : null}
+      {currentDueNotice ? (
+        <p className="text-sm text-zinc-800">{currentDueNotice}</p>
+      ) : null}
+      {error ? <p className="text-sm text-red-800">{error}</p> : null}
 
       <div className="flex flex-wrap gap-2">
         {FILTERS.map((option) => (
@@ -176,8 +269,6 @@ export function FindingFollowUpReviewPanel({
           </button>
         ))}
       </div>
-
-      {error ? <p className="text-sm text-red-800">{error}</p> : null}
 
       {payload == null && !error ? (
         <p className="text-sm text-zinc-600">
@@ -221,13 +312,30 @@ export function FindingFollowUpReviewPanel({
                     </div>
                   </dl>
                 </div>
-                <button
-                  type="button"
-                  className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm"
-                  onClick={() => onOpenFinding(item.finding_id)}
-                >
-                  Open finding
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm"
+                    onClick={() => {
+                      setDueGeneration((value) => value + 1);
+                      setDueIntent({
+                        findingId: item.finding_id,
+                        title: item.title,
+                        targetLabel: item.target_label,
+                        dueState: item.due_state,
+                      });
+                    }}
+                  >
+                    {DUE_ACTION_LABELS[item.due_state]}
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm"
+                    onClick={() => onOpenFinding(item.finding_id)}
+                  >
+                    Open finding
+                  </button>
+                </div>
               </li>
             );
           })}
@@ -243,6 +351,18 @@ export function FindingFollowUpReviewPanel({
         >
           Next page
         </button>
+      ) : null}
+
+      {dueIntent ? (
+        <FindingFollowUpDueModal
+          key={dueGeneration}
+          intent={dueIntent}
+          onClose={() => setDueIntent(null)}
+          onWriteSucceeded={handleWriteSucceeded}
+          onAlreadyDue={handleAlreadyDue}
+          onResolvedConflict={handleResolvedConflict}
+          onTransportUncertain={handleTransportUncertain}
+        />
       ) : null}
     </section>
   );
