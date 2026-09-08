@@ -1493,6 +1493,45 @@ export function fetchFindingOwnershipReview(
   );
 }
 
+export type BulkOwnershipAssignItem = {
+  finding_id: string;
+  expected_follow_up: ExpectedFollowUpState;
+};
+
+export type BulkOwnershipAssignRequest = {
+  assigned_to_user_id: string;
+  items: BulkOwnershipAssignItem[];
+};
+
+export type BulkOwnershipAssignResponse = {
+  selected_count: number;
+  changed_count: number;
+  unchanged_count: number;
+};
+
+export function bulkAssignFindingOwnership(
+  token: string,
+  body: BulkOwnershipAssignRequest,
+): Promise<BulkOwnershipAssignResponse> {
+  return apiFetch<BulkOwnershipAssignResponse>(
+    "/v1/findings/ownership-review/bulk-assign",
+    token,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        assigned_to_user_id: body.assigned_to_user_id,
+        items: body.items.map((item) => ({
+          finding_id: item.finding_id,
+          expected_follow_up: {
+            assigned_to_user_id: item.expected_follow_up.assigned_to_user_id,
+            follow_up_due_at: item.expected_follow_up.follow_up_due_at,
+          },
+        })),
+      }),
+    },
+  );
+}
+
 export type FindingFollowUpDueState = "no_due_date" | "upcoming" | "overdue";
 
 export type FindingFollowUpReviewAssignee = {

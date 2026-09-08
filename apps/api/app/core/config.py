@@ -119,6 +119,9 @@ class Settings(BaseSettings):
     rate_limit_organization_finding_ownership_read: int = Field(
         default=60, alias="RATE_LIMIT_ORGANIZATION_FINDING_OWNERSHIP_READ"
     )
+    rate_limit_organization_finding_ownership_bulk_assign: int = Field(
+        default=20, alias="RATE_LIMIT_ORGANIZATION_FINDING_OWNERSHIP_BULK_ASSIGN"
+    )
     rate_limit_organization_finding_follow_up_read: int = Field(
         default=60, alias="RATE_LIMIT_ORGANIZATION_FINDING_FOLLOW_UP_READ"
     )

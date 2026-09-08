@@ -27,6 +27,10 @@ from app.schemas.finding_follow_up_reminder_status import (
     FindingFollowUpReminderStatusResponse,
 )
 from app.schemas.finding_follow_up_review import FindingFollowUpReviewResponse
+from app.schemas.finding_ownership_bulk_assign import (
+    BulkOwnershipAssignRequest,
+    BulkOwnershipAssignResponse,
+)
 from app.schemas.finding_ownership_review import (
     ActiveFindingStatus,
     FindingOwnershipReviewResponse,
@@ -73,17 +77,18 @@ from app.services.findings.follow_up_review import (
     normalize_due_filter,
     resolve_follow_up_review_cursor,
 )
+from app.services.findings.ownership_bulk_assign import bulk_assign_finding_ownership
 from app.services.findings.ownership_review import DEFAULT_PAGE_SIZE as OWNERSHIP_DEFAULT_PAGE_SIZE
 from app.services.findings.ownership_review import MAX_PAGE_SIZE as OWNERSHIP_MAX_PAGE_SIZE
 from app.services.findings.ownership_review import (
     list_finding_ownership_review,
     resolve_ownership_review_cursor,
 )
-from app.services.findings.review_filters import normalize_review_filters
 from app.services.findings.remediation_record import (
     DEFAULT_REMEDIATION_PAGE_SIZE,
     MAX_REMEDIATION_PAGE_SIZE,
 )
+from app.services.findings.review_filters import normalize_review_filters
 from app.services.findings.timeline import (
     DEFAULT_TIMELINE_PAGE_SIZE,
     MAX_TIMELINE_PAGE_SIZE,
@@ -97,6 +102,7 @@ from app.services.provenance import build_finding_provenance
 from app.services.rate_limit import (
     ACTION_FINDING_FOLLOW_UP,
     ACTION_ORGANIZATION_FINDING_FOLLOW_UP_READ,
+    ACTION_ORGANIZATION_FINDING_OWNERSHIP_BULK_ASSIGN,
     ACTION_ORGANIZATION_FINDING_OWNERSHIP_READ,
     ACTION_REMEDIATION_RECORD,
     ACTION_RETEST,
@@ -272,6 +278,43 @@ def finding_ownership_review_endpoint(
         status=filters.status,
         cursor_created_at=cursor_created_at,
         cursor_finding_id=cursor_finding_id,
+    )
+
+
+# Must stay above "/{finding_id}" for the same reason as /inbox.
+@router.post(
+    "/ownership-review/bulk-assign",
+    response_model=BulkOwnershipAssignResponse,
+)
+def bulk_assign_finding_ownership_endpoint(
+    body: BulkOwnershipAssignRequest,
+    auth: Annotated[AuthContext, Depends(get_auth_context)],
+    db: Annotated[Session, Depends(get_db)],
+    directory: Annotated[ClerkDirectory, Depends(get_clerk_directory)],
+) -> BulkOwnershipAssignResponse:
+    """Assign selected active Findings to one current organization member.
+
+    Owner-only. Due dates are concurrency preconditions and are never written
+    from the request. Clerk assignee verification runs before Finding locks.
+    """
+    require_active_organization(auth)
+    assert auth.active_organization is not None
+    organization, _membership, actor = require_org_admin(
+        auth.active_organization.id, auth, db
+    )
+    enforce_rate_limit(
+        db,
+        organization_id=organization.id,
+        user_id=actor.user_id,
+        action=ACTION_ORGANIZATION_FINDING_OWNERSHIP_BULK_ASSIGN,
+    )
+    return bulk_assign_finding_ownership(
+        db,
+        organization=organization,
+        actor=actor,
+        directory=directory,
+        assigned_to_user_id=body.assigned_to_user_id,
+        items=body.items,
     )
 
 

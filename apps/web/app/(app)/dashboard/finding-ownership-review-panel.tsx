@@ -3,6 +3,10 @@
 import { useAuth } from "@clerk/nextjs";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { FindingOwnershipAssignModal, type OwnershipAssignIntent } from "./finding-ownership-assign-modal";
+import {
+  FindingOwnershipBulkAssignModal,
+  type BulkOwnershipAssignIntent,
+} from "./finding-ownership-bulk-assign-modal";
 import { FindingReviewFilters } from "./finding-review-filters";
 import {
   fetchFindingOwnershipReview,
@@ -29,6 +33,7 @@ type Props = {
 };
 
 const PAGE_SIZE = 50;
+const MAX_BULK_SELECTION = 50;
 
 const ASSIGNMENT_LABELS: Record<FindingOwnershipAssignmentState, string> = {
   unassigned: "Unassigned",
@@ -77,6 +82,12 @@ export function FindingOwnershipReviewPanel({
     null,
   );
   const [assignGeneration, setAssignGeneration] = useState(0);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkIntent, setBulkIntent] = useState<BulkOwnershipAssignIntent | null>(
+    null,
+  );
+  const [bulkGeneration, setBulkGeneration] = useState(0);
+  const [bulkEpoch, setBulkEpoch] = useState(0);
   const [targetId, setTargetId] = useState("");
   const [severity, setSeverity] = useState("");
   const [status, setStatus] = useState("");
@@ -106,6 +117,9 @@ export function FindingOwnershipReviewPanel({
     setTargetId("");
     setTargets([]);
     setTargetsError(null);
+    setSelectedIds([]);
+    setBulkIntent(null);
+    setBulkEpoch((value) => value + 1);
   }
 
   const currentSnapshot = useCallback(
@@ -148,9 +162,23 @@ export function FindingOwnershipReviewPanel({
       pageCursorRef.current = request.cursor;
       viewRef.current = currentSnapshot(request.cursor);
       setPayload(next);
+      setSelectedIds([]);
+      setBulkIntent(null);
+      setBulkEpoch((value) => value + 1);
       return true;
     },
     [currentSnapshot],
+  );
+
+  const invalidateBulk = useCallback(() => {
+    setBulkEpoch((value) => value + 1);
+    setSelectedIds([]);
+    setBulkIntent(null);
+  }, []);
+
+  const isBulkSubmitCurrent = useCallback(
+    (generation: number) => generation === bulkEpoch,
+    [bulkEpoch],
   );
 
   const fetchPage = useCallback(
@@ -305,6 +333,78 @@ export function FindingOwnershipReviewPanel({
     });
   }, [refreshAfterMutation]);
 
+  const handleBulkWriteSucceeded = useCallback(async () => {
+    setSuccess("Selected findings assigned.");
+    setRefreshWarning(null);
+    setNotice(null);
+    setError(null);
+    invalidateBulk();
+    try {
+      await refreshAfterMutation();
+    } catch {
+      setRefreshWarning(
+        "Assignment updated, but ownership review could not be refreshed.",
+      );
+    }
+  }, [invalidateBulk, refreshAfterMutation]);
+
+  const handleBulkTransportUncertain = useCallback(async () => {
+    setSuccess(null);
+    setRefreshWarning(null);
+    setNotice(null);
+    setError(
+      "Bulk assignment outcome could not be confirmed. Ownership review was refreshed.",
+    );
+    invalidateBulk();
+    try {
+      await refreshAfterMutation();
+    } catch {
+      setError(
+        "Bulk assignment outcome could not be confirmed. Ownership review was refreshed.",
+      );
+    }
+  }, [invalidateBulk, refreshAfterMutation]);
+
+  const toggleSelected = useCallback((findingId: string) => {
+    setSelectedIds((current) => {
+      if (current.includes(findingId)) {
+        return current.filter((id) => id !== findingId);
+      }
+      if (current.length >= MAX_BULK_SELECTION) return current;
+      return [...current, findingId];
+    });
+  }, []);
+
+  const selectVisible = useCallback(() => {
+    if (payload == null) return;
+    setSelectedIds(
+      payload.items.map((item) => item.finding_id).slice(0, MAX_BULK_SELECTION),
+    );
+  }, [payload]);
+
+  const openBulkAssign = useCallback(() => {
+    if (payload == null || selectedIds.length === 0) return;
+    const selected = new Set(selectedIds);
+    const items = payload.items
+      .filter((item) => selected.has(item.finding_id))
+      .slice(0, MAX_BULK_SELECTION)
+      .map((item) => ({
+        finding_id: item.finding_id,
+        expected_follow_up: {
+          assigned_to_user_id: item.assignee?.user_id ?? null,
+          follow_up_due_at: item.follow_up_due_at,
+        },
+      }));
+    if (items.length === 0) return;
+    openedPageRef.current = currentSnapshot(pageCursorRef.current);
+    setBulkGeneration((value) => value + 1);
+    setBulkIntent({
+      selectedCount: items.length,
+      items,
+      submitGeneration: bulkEpoch,
+    });
+  }, [bulkEpoch, currentSnapshot, payload, selectedIds]);
+
   if (!enabled) return null;
 
   const filtered = Boolean(targetId || severity || status);
@@ -325,6 +425,7 @@ export function FindingOwnershipReviewPanel({
           disabled={pending}
           className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm disabled:opacity-50"
           onClick={() => {
+            invalidateBulk();
             generationRef.current += 1;
             pageCursorRef.current = null;
             nextInFlightRef.current = null;
@@ -343,9 +444,18 @@ export function FindingOwnershipReviewPanel({
         targetsLoading={targetsLoading}
         targetsError={targetsError}
         disabled={pending}
-        onTargetId={setTargetId}
-        onSeverity={setSeverity}
-        onStatus={setStatus}
+        onTargetId={(value) => {
+          invalidateBulk();
+          setTargetId(value);
+        }}
+        onSeverity={(value) => {
+          invalidateBulk();
+          setSeverity(value);
+        }}
+        onStatus={(value) => {
+          invalidateBulk();
+          setStatus(value);
+        }}
       />
 
       {success ? <p className="text-sm text-zinc-800">{success}</p> : null}
@@ -354,6 +464,28 @@ export function FindingOwnershipReviewPanel({
       ) : null}
       {notice ? <p className="text-sm text-zinc-800">{notice}</p> : null}
       {error ? <p className="text-sm text-red-800">{error}</p> : null}
+
+      {payload != null && payload.items.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={pending}
+            className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm disabled:opacity-50"
+            onClick={selectVisible}
+          >
+            Select visible
+          </button>
+          <p className="text-sm text-zinc-600">{selectedIds.length} selected</p>
+          <button
+            type="button"
+            disabled={pending || selectedIds.length === 0}
+            className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm disabled:opacity-50"
+            onClick={openBulkAssign}
+          >
+            Assign selected
+          </button>
+        </div>
+      ) : null}
 
       {payload == null && !error ? (
         <p className="text-sm text-zinc-600">
@@ -372,7 +504,16 @@ export function FindingOwnershipReviewPanel({
                   selected ? "bg-zinc-50" : ""
                 }`}
               >
-                <div className="min-w-0 space-y-1 text-sm">
+                <label className="mt-1 flex items-start">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={selectedIds.includes(item.finding_id)}
+                    onChange={() => toggleSelected(item.finding_id)}
+                    aria-label={`Select ${item.title}`}
+                  />
+                </label>
+                <div className="min-w-0 flex-1 space-y-1 text-sm">
                   <p className="font-medium text-zinc-900">{item.title}</p>
                   <dl className="flex flex-wrap gap-x-4 gap-y-1 text-zinc-600">
                     <div>
@@ -437,7 +578,10 @@ export function FindingOwnershipReviewPanel({
           type="button"
           disabled={pending}
           className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm disabled:opacity-50"
-          onClick={() => load(payload.next_cursor)}
+          onClick={() => {
+            invalidateBulk();
+            load(payload.next_cursor);
+          }}
         >
           Next page
         </button>
@@ -451,6 +595,17 @@ export function FindingOwnershipReviewPanel({
           onWriteSucceeded={handleWriteSucceeded}
           onAlreadyOwner={handleAlreadyOwner}
           onResolvedConflict={handleResolvedConflict}
+        />
+      ) : null}
+
+      {bulkIntent ? (
+        <FindingOwnershipBulkAssignModal
+          key={bulkGeneration}
+          intent={bulkIntent}
+          isSubmitCurrent={isBulkSubmitCurrent}
+          onClose={() => setBulkIntent(null)}
+          onWriteSucceeded={handleBulkWriteSucceeded}
+          onTransportUncertain={handleBulkTransportUncertain}
         />
       ) : null}
     </section>

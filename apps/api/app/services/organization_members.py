@@ -157,14 +157,19 @@ def list_active_organization_members(
     )
 
 
-def assert_assignable_org_member(
+def verify_assignable_org_member(
     db: Session,
     *,
     directory: ClerkDirectory,
     organization: Organization,
     user_id: UUID,
 ) -> User:
-    """Fail closed unless Clerk says this app user is a current org member."""
+    """Provider-authoritative assignability. No OrganizationMembership writes.
+
+    May read the local User to resolve the Clerk user id. Does not insert,
+    update, or flush OrganizationMembership, and performs no other persistent
+    DB warm/write.
+    """
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(
@@ -189,7 +194,19 @@ def assert_assignable_org_member(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Assignee must be a current organization member",
         )
-    # Warm local membership after authoritative accept.
+    return user
+
+
+def warm_local_org_membership(
+    db: Session,
+    *,
+    organization: Organization,
+    user: User,
+) -> None:
+    """Cache-warm local OrganizationMembership after provider accept.
+
+    No Clerk/provider I/O. Flush stays in the caller's transaction.
+    """
     existing = db.scalar(
         select(OrganizationMembership).where(
             OrganizationMembership.organization_id == organization.id,
@@ -205,4 +222,21 @@ def assert_assignable_org_member(
             )
         )
         db.flush()
+
+
+def assert_assignable_org_member(
+    db: Session,
+    *,
+    directory: ClerkDirectory,
+    organization: Organization,
+    user_id: UUID,
+) -> User:
+    """Fail closed unless Clerk says this app user is a current org member."""
+    user = verify_assignable_org_member(
+        db,
+        directory=directory,
+        organization=organization,
+        user_id=user_id,
+    )
+    warm_local_org_membership(db, organization=organization, user=user)
     return user
