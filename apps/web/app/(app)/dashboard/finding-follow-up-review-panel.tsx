@@ -3,6 +3,10 @@
 import { useAuth } from "@clerk/nextjs";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import {
+  FindingFollowUpBulkDueModal,
+  type BulkFollowUpDueIntent,
+} from "./finding-follow-up-bulk-due-modal";
+import {
   FindingFollowUpDueModal,
   type DueDateIntent,
 } from "./finding-follow-up-due-modal";
@@ -11,6 +15,7 @@ import { parseApiError } from "@/lib/api-error";
 import {
   fetchFindingFollowUpReview,
   fetchTargets,
+  type BulkFollowUpDueResponse,
   type FindingFollowUpDueState,
   type FindingFollowUpReviewItem,
   type FindingFollowUpReviewResponse,
@@ -34,6 +39,7 @@ type Props = {
 type FilterValue = "all" | FindingFollowUpDueState;
 
 const PAGE_SIZE = 50;
+const MAX_BULK_SELECTION = 50;
 const INVALID_CURSOR = "Invalid finding follow-up review cursor";
 
 const FILTERS: Array<{ value: FilterValue; label: string }> = [
@@ -101,6 +107,12 @@ export function FindingFollowUpReviewPanel({
   const [pending, startTransition] = useTransition();
   const [dueIntent, setDueIntent] = useState<DueDateIntent | null>(null);
   const [dueGeneration, setDueGeneration] = useState(0);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkDueIntent, setBulkDueIntent] =
+    useState<BulkFollowUpDueIntent | null>(null);
+  const [bulkDueGeneration, setBulkDueGeneration] = useState(0);
+  const [bulkDueEpoch, setBulkDueEpoch] = useState(0);
+  const [reviewReplacing, setReviewReplacing] = useState(false);
 
   const generationRef = useRef(0);
   const pageCursorRef = useRef<string | null>(null);
@@ -109,6 +121,7 @@ export function FindingFollowUpReviewPanel({
   const mountedRef = useRef(true);
   const targetGenerationRef = useRef(0);
   const recoveringCursorRef = useRef(false);
+  const reviewReplacementRef = useRef(0);
   const viewRef = useRef<FollowUpReviewRequestSnapshot>({
     organizationId,
     targetId: null,
@@ -124,6 +137,9 @@ export function FindingFollowUpReviewPanel({
     setTargetId("");
     setTargets([]);
     setTargetsError(null);
+    setSelectedIds([]);
+    setBulkDueIntent(null);
+    setBulkDueEpoch((value) => value + 1);
   }
 
   const currentSnapshot = useCallback(
@@ -152,6 +168,17 @@ export function FindingFollowUpReviewPanel({
     viewRef.current = currentSnapshot(pageCursorRef.current);
   }, [currentSnapshot]);
 
+  const invalidateBulkDue = useCallback(() => {
+    setBulkDueEpoch((value) => value + 1);
+    setSelectedIds([]);
+    setBulkDueIntent(null);
+  }, []);
+
+  const isBulkDueSubmitCurrent = useCallback(
+    (generation: number) => generation === bulkDueEpoch,
+    [bulkDueEpoch],
+  );
+
   const applyIfCurrent = useCallback(
     (request: FollowUpReviewRequestSnapshot, next: FindingFollowUpReviewResponse) => {
       const live = currentSnapshot(pageCursorRef.current);
@@ -170,9 +197,10 @@ export function FindingFollowUpReviewPanel({
       recoveringCursorRef.current = false;
       viewRef.current = currentSnapshot(request.cursor);
       setPayload(next);
+      invalidateBulkDue();
       return true;
     },
-    [currentSnapshot],
+    [currentSnapshot, invalidateBulkDue],
   );
 
   const fetchPage = useCallback(
@@ -203,6 +231,10 @@ export function FindingFollowUpReviewPanel({
         if (nextInFlightRef.current) return;
         nextInFlightRef.current = cursor;
       }
+      const replacement = reviewReplacementRef.current + 1;
+      reviewReplacementRef.current = replacement;
+      invalidateBulkDue();
+      setReviewReplacing(true);
       latestRequestRef.current = request;
       viewRef.current = request;
       startTransition(async () => {
@@ -244,10 +276,20 @@ export function FindingFollowUpReviewPanel({
           if (nextInFlightRef.current === cursor) {
             nextInFlightRef.current = null;
           }
+          if (reviewReplacementRef.current === replacement) {
+            setReviewReplacing(false);
+          }
         }
       });
     },
-    [applyIfCurrent, currentSnapshot, enabled, fetchPage, organizationId],
+    [
+      applyIfCurrent,
+      currentSnapshot,
+      enabled,
+      fetchPage,
+      invalidateBulkDue,
+      organizationId,
+    ],
   );
 
   useEffect(() => {
@@ -293,18 +335,26 @@ export function FindingFollowUpReviewPanel({
   }, [enabled, getToken, organizationId]);
 
   const refreshFirstPageCurrent = useCallback(async () => {
+    invalidateBulkDue();
+    const replacement = reviewReplacementRef.current + 1;
+    reviewReplacementRef.current = replacement;
+    setReviewReplacing(true);
+    generationRef.current += 1;
     pageCursorRef.current = null;
     nextInFlightRef.current = null;
-    const request = {
-      ...viewRef.current,
-      cursor: null,
-      generation: generationRef.current,
-    };
+    recoveringCursorRef.current = false;
+    const request = currentSnapshot(null);
     latestRequestRef.current = request;
     viewRef.current = request;
-    const next = await fetchPage(request);
-    applyIfCurrent(request, next);
-  }, [applyIfCurrent, fetchPage]);
+    try {
+      const next = await fetchPage(request);
+      applyIfCurrent(request, next);
+    } finally {
+      if (reviewReplacementRef.current === replacement) {
+        setReviewReplacing(false);
+      }
+    }
+  }, [applyIfCurrent, currentSnapshot, fetchPage, invalidateBulkDue]);
 
   const handleWriteSucceeded = useCallback(async () => {
     setSuccess("Follow-up due date updated.");
@@ -366,6 +416,118 @@ export function FindingFollowUpReviewPanel({
     [refreshFirstPageCurrent],
   );
 
+  const handleBulkDueWriteSucceeded = useCallback(
+    async (response: BulkFollowUpDueResponse) => {
+      setSuccess(
+        response.changed_count === 0
+          ? "Selected findings already use this follow-up due date."
+          : `Follow-up due date updated for ${response.changed_count} selected ${
+              response.changed_count === 1 ? "finding" : "findings"
+            }.`,
+      );
+      setRefreshWarning(null);
+      setNotice(null);
+      setCurrentDueNotice(null);
+      setError(null);
+      invalidateBulkDue();
+      try {
+        await refreshFirstPageCurrent();
+      } catch {
+        setRefreshWarning(
+          "Due dates were updated, but the follow-up review could not be refreshed.",
+        );
+      }
+    },
+    [invalidateBulkDue, refreshFirstPageCurrent],
+  );
+
+  const handleBulkDueConflict = useCallback(
+    async (message: string) => {
+      setSuccess(null);
+      setRefreshWarning(null);
+      setCurrentDueNotice(null);
+      setError(null);
+      setNotice(message);
+      invalidateBulkDue();
+      try {
+        await refreshFirstPageCurrent();
+      } catch {
+        setError("Finding follow-up review could not be loaded.");
+      }
+    },
+    [invalidateBulkDue, refreshFirstPageCurrent],
+  );
+
+  const handleBulkDueTransportUncertain = useCallback(async () => {
+    setSuccess(null);
+    setRefreshWarning(null);
+    setCurrentDueNotice(null);
+    setError(null);
+    invalidateBulkDue();
+    try {
+      await refreshFirstPageCurrent();
+      setNotice(
+        "Bulk due-date update outcome could not be confirmed. Follow-up review was refreshed.",
+      );
+    } catch {
+      setNotice("Bulk due-date update outcome could not be confirmed.");
+      setRefreshWarning("Follow-up review could not be refreshed.");
+    }
+  }, [invalidateBulkDue, refreshFirstPageCurrent]);
+
+  const toggleBulkDueSelected = useCallback(
+    (findingId: string) => {
+      if (reviewReplacing) return;
+      setSelectedIds((current) => {
+        if (current.includes(findingId)) {
+          return current.filter((id) => id !== findingId);
+        }
+        if (current.length >= MAX_BULK_SELECTION) return current;
+        return [...current, findingId];
+      });
+    },
+    [reviewReplacing],
+  );
+
+  const selectVisibleForBulkDue = useCallback(() => {
+    if (payload == null || reviewReplacing) return;
+    setSelectedIds(
+      payload.items.map((item) => item.finding_id).slice(0, MAX_BULK_SELECTION),
+    );
+  }, [payload, reviewReplacing]);
+
+  const openBulkDue = useCallback(() => {
+    if (payload == null || reviewReplacing || selectedIds.length === 0) return;
+    const selected = new Set(selectedIds);
+    const items = payload.items
+      .filter((item) => selected.has(item.finding_id))
+      .slice(0, MAX_BULK_SELECTION)
+      .map((item) => ({
+        finding_id: item.finding_id,
+        expected_follow_up: {
+          assigned_to_user_id: item.assignee?.user_id ?? null,
+          follow_up_due_at: item.follow_up_due_at,
+        },
+      }));
+    if (items.length !== selectedIds.length || items.length === 0) {
+      invalidateBulkDue();
+      return;
+    }
+    setBulkDueGeneration((value) => value + 1);
+    setBulkDueIntent({
+      selectedCount: items.length,
+      items,
+      submitGeneration: bulkDueEpoch,
+      evaluationTime: payload.evaluation_time,
+    });
+  }, [
+    bulkDueEpoch,
+    invalidateBulkDue,
+    payload,
+    reviewReplacing,
+    selectedIds,
+  ]);
+
   if (!enabled) return null;
 
   const filtered = Boolean(targetId || severity || status || filter !== "all");
@@ -416,7 +578,10 @@ export function FindingFollowUpReviewPanel({
                 ? "border-zinc-900 bg-zinc-900 text-white"
                 : "border-zinc-300"
             }`}
-            onClick={() => setFilter(option.value)}
+            onClick={() => {
+              invalidateBulkDue();
+              setFilter(option.value);
+            }}
           >
             {option.label}
           </button>
@@ -431,10 +596,43 @@ export function FindingFollowUpReviewPanel({
         targetsLoading={targetsLoading}
         targetsError={targetsError}
         disabled={pending}
-        onTargetId={setTargetId}
-        onSeverity={setSeverity}
-        onStatus={setStatus}
+        onTargetId={(value) => {
+          invalidateBulkDue();
+          setTargetId(value);
+        }}
+        onSeverity={(value) => {
+          invalidateBulkDue();
+          setSeverity(value);
+        }}
+        onStatus={(value) => {
+          invalidateBulkDue();
+          setStatus(value);
+        }}
       />
+
+      {payload != null && payload.items.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={reviewReplacing}
+            className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm disabled:opacity-50"
+            onClick={selectVisibleForBulkDue}
+          >
+            Select visible
+          </button>
+          <span className="text-sm text-zinc-600">
+            {selectedIds.length} selected
+          </span>
+          <button
+            type="button"
+            disabled={reviewReplacing || selectedIds.length === 0}
+            className="rounded-md border border-zinc-900 bg-zinc-900 px-3 py-1.5 text-sm text-white disabled:opacity-50"
+            onClick={openBulkDue}
+          >
+            Set due date for selected
+          </button>
+        </div>
+      ) : null}
 
       {payload == null && !error ? (
         <p className="text-sm text-zinc-600">
@@ -446,6 +644,7 @@ export function FindingFollowUpReviewPanel({
         <ul className="divide-y divide-zinc-200 border-t border-zinc-200">
           {payload.items.map((item) => {
             const selected = item.finding_id === selectedFindingId;
+            const bulkSelected = selectedIds.includes(item.finding_id);
             return (
               <li
                 key={item.finding_id}
@@ -453,6 +652,16 @@ export function FindingFollowUpReviewPanel({
                   selected ? "bg-zinc-50" : ""
                 }`}
               >
+                <label className="flex items-center gap-2 text-sm text-zinc-700">
+                  <input
+                    type="checkbox"
+                    checked={bulkSelected}
+                    disabled={reviewReplacing}
+                    aria-label={`Select ${item.title} for bulk due-date update`}
+                    onChange={() => toggleBulkDueSelected(item.finding_id)}
+                  />
+                  <span className="sr-only">Select finding</span>
+                </label>
                 <div className="min-w-0 space-y-1 text-sm">
                   <p className="font-medium text-zinc-900">{item.title}</p>
                   <dl className="flex flex-wrap gap-x-4 gap-y-1 text-zinc-600">
@@ -528,6 +737,18 @@ export function FindingFollowUpReviewPanel({
           onAlreadyDue={handleAlreadyDue}
           onResolvedConflict={handleResolvedConflict}
           onTransportUncertain={handleTransportUncertain}
+        />
+      ) : null}
+
+      {bulkDueIntent ? (
+        <FindingFollowUpBulkDueModal
+          key={bulkDueGeneration}
+          intent={bulkDueIntent}
+          isSubmitCurrent={isBulkDueSubmitCurrent}
+          onClose={() => setBulkDueIntent(null)}
+          onWriteSucceeded={handleBulkDueWriteSucceeded}
+          onAuthoritativeConflict={handleBulkDueConflict}
+          onTransportUncertain={handleBulkDueTransportUncertain}
         />
       ) : null}
     </section>

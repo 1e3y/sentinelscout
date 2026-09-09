@@ -994,8 +994,9 @@ def test_m49_frontend_selection_and_transport_contract():
     assert "for (" not in helper
     assert "while (" not in helper
     assert "retry" not in helper.lower()
-    assert 'type="checkbox"' not in m46
-    assert "Select visible" not in m46
+    assert "postBulkOwnershipAssign" not in m46
+    assert "FindingOwnershipBulkAssignModal" not in m46
+    assert "Assign selected" not in m46
     assert "stale" not in panel.lower() or "shouldApplyReviewResult" in panel
     assert "setSelectedIds(next.items" not in panel
     assert "setSelectedIds(payload.items" not in panel

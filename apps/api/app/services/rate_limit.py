@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -38,6 +38,9 @@ ACTION_ORGANIZATION_FINDING_OWNERSHIP_BULK_ASSIGN = (
     "organization.finding_ownership.bulk_assign"
 )
 ACTION_ORGANIZATION_FINDING_FOLLOW_UP_READ = "organization.finding_follow_up.read"
+ACTION_ORGANIZATION_FINDING_FOLLOW_UP_BULK_DUE = (
+    "organization.finding_follow_up.bulk_due"
+)
 SHARED_REPORT_COARSE_PARTITIONS = 64
 
 
@@ -73,6 +76,9 @@ def _limit_for_action(settings: Settings, action: str) -> int:
         ACTION_ORGANIZATION_FINDING_FOLLOW_UP_READ: (
             settings.rate_limit_organization_finding_follow_up_read
         ),
+        ACTION_ORGANIZATION_FINDING_FOLLOW_UP_BULK_DUE: (
+            settings.rate_limit_organization_finding_follow_up_bulk_due
+        ),
     }.get(action, settings.rate_limit_operation_create)
 
 
@@ -92,7 +98,7 @@ def coarse_share_partition(share_id: UUID) -> str:
 def _window_start(now: datetime, window_seconds: int) -> datetime:
     epoch = int(now.timestamp())
     aligned = epoch - (epoch % window_seconds)
-    return datetime.fromtimestamp(aligned, tz=timezone.utc)
+    return datetime.fromtimestamp(aligned, tz=UTC)
 
 
 def enforce_rate_limit(
@@ -108,7 +114,7 @@ def enforce_rate_limit(
         return
 
     limit = _limit_for_action(cfg, action)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     window_start = _window_start(now, cfg.rate_limit_window_seconds)
 
     # Serialize increments for the same counter key.
@@ -182,7 +188,7 @@ def enforce_anonymous_rate_limit(
         return
 
     limit = _limit_for_action(cfg, action)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     window_start = _window_start(now, cfg.rate_limit_window_seconds)
 
     db.execute(

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -21,6 +21,10 @@ from app.schemas.finding import FindingResponse
 from app.schemas.finding_follow_up import (
     FindingFollowUpResponse,
     UpdateFindingFollowUpRequest,
+)
+from app.schemas.finding_follow_up_bulk_due import (
+    BulkFollowUpDueRequest,
+    BulkFollowUpDueResponse,
 )
 from app.schemas.finding_follow_up_reminder_status import (
     FindingFollowUpReminderHistoryResponse,
@@ -64,6 +68,9 @@ from app.services.findings import (
     update_finding_follow_up,
 )
 from app.services.findings.follow_up import resolve_follow_up_response
+from app.services.findings.follow_up_bulk_due import (
+    bulk_update_finding_follow_up_due,
+)
 from app.services.findings.follow_up_reminder_status import (
     DEFAULT_HISTORY_PAGE_SIZE,
     MAX_HISTORY_PAGE_SIZE,
@@ -101,6 +108,7 @@ from app.services.findings_inbox import (
 from app.services.provenance import build_finding_provenance
 from app.services.rate_limit import (
     ACTION_FINDING_FOLLOW_UP,
+    ACTION_ORGANIZATION_FINDING_FOLLOW_UP_BULK_DUE,
     ACTION_ORGANIZATION_FINDING_FOLLOW_UP_READ,
     ACTION_ORGANIZATION_FINDING_OWNERSHIP_BULK_ASSIGN,
     ACTION_ORGANIZATION_FINDING_OWNERSHIP_READ,
@@ -344,7 +352,7 @@ def finding_follow_up_review_endpoint(
     organization, _membership, actor = require_org_admin(
         auth.active_organization.id, auth, db
     )
-    request_now = datetime.now(timezone.utc)
+    request_now = datetime.now(UTC)
     due_filter = normalize_due_filter(due_state)
     filters = normalize_review_filters(
         target_id=target_id, severity=severity, status=status
@@ -374,6 +382,39 @@ def finding_follow_up_review_endpoint(
         target_id=filters.target_id,
         severity=filters.severity,
         status=filters.status,
+    )
+
+
+# Must stay above "/{finding_id}" so "follow-up-review" is not parsed as a UUID.
+@router.post(
+    "/follow-up-review/bulk-due",
+    response_model=BulkFollowUpDueResponse,
+)
+def bulk_update_finding_follow_up_due_endpoint(
+    body: BulkFollowUpDueRequest,
+    auth: Annotated[AuthContext, Depends(get_auth_context)],
+    db: Annotated[Session, Depends(get_db)],
+    directory: Annotated[ClerkDirectory, Depends(get_clerk_directory)],
+) -> BulkFollowUpDueResponse:
+    """Set selected active Findings to one due instant without changing owners."""
+    require_active_organization(auth)
+    assert auth.active_organization is not None
+    organization, _membership, actor = require_org_admin(
+        auth.active_organization.id, auth, db
+    )
+    enforce_rate_limit(
+        db,
+        organization_id=organization.id,
+        user_id=actor.user_id,
+        action=ACTION_ORGANIZATION_FINDING_FOLLOW_UP_BULK_DUE,
+    )
+    return bulk_update_finding_follow_up_due(
+        db,
+        organization=organization,
+        actor=actor,
+        directory=directory,
+        follow_up_due_at=body.follow_up_due_at,
+        items=body.items,
     )
 
 

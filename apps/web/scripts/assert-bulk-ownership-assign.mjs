@@ -33,12 +33,15 @@ assert(
   m44.includes("FindingOwnershipBulkAssignModal"),
   "M44 hosts the bulk modal",
 );
-assert(
-  !m46.includes('type="checkbox"'),
-  "M46 has no bulk ownership checkboxes",
-);
-assert(!m46.includes("Select visible"), "M46 has no Select visible");
 assert(!m46.includes("Assign selected"), "M46 has no Assign selected");
+assert(
+  !m46.includes("postBulkOwnershipAssign"),
+  "M46 does not call bulk ownership assign",
+);
+assert(
+  !m46.includes("FindingOwnershipBulkAssignModal"),
+  "M46 does not host the ownership bulk modal",
+);
 assert(
   !m45.includes("postBulkOwnershipAssign"),
   "M45 does not call bulk assign",

@@ -30,7 +30,12 @@ from app.schemas.organization_members import (
     OrganizationMemberItem,
     OrganizationMembersResponse,
 )
-from app.services.clerk import ClerkDirectory, ClerkOrganizationMember, ClerkUserInfo
+from app.services.clerk import (
+    ClerkDirectory,
+    ClerkOrganizationMember,
+    ClerkUserInfo,
+    FindingOwnershipPresenceUnavailable,
+)
 from app.services.sync import upsert_user
 
 DEFAULT_MEMBER_PAGE_SIZE = 50
@@ -195,6 +200,84 @@ def verify_assignable_org_member(
             detail="Assignee must be a current organization member",
         )
     return user
+
+
+def verify_current_org_member_batch(
+    db: Session,
+    *,
+    directory: ClerkDirectory,
+    organization: Organization,
+    user_ids: list[UUID],
+) -> dict[UUID, User]:
+    """Verify an exact local-User set through one provider presence read.
+
+    The IDs must come from a valid Finding preflight. This helper performs no
+    local membership warm/write and does not call Clerk unless every local
+    owner resolves to one unambiguous provider identity.
+    """
+    ordered_ids = sorted(set(user_ids))
+    if not ordered_ids:
+        return {}
+
+    users = list(
+        db.scalars(
+            select(User).where(User.id.in_(ordered_ids)).order_by(User.id.asc())
+        ).all()
+    )
+    if len(users) != len(ordered_ids):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Selected findings changed. Refresh and try again.",
+        )
+
+    provider_ids: list[str] = []
+    seen_provider_ids: set[str] = set()
+    for user in users:
+        provider_id = user.clerk_user_id
+        if not isinstance(provider_id, str) or not provider_id.strip():
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Failed to verify organization membership",
+            )
+        provider_id = provider_id.strip()
+        if provider_id in seen_provider_ids:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Failed to verify organization membership",
+            )
+        seen_provider_ids.add(provider_id)
+        provider_ids.append(provider_id)
+
+    try:
+        present = directory.list_organization_membership_presence(
+            organization.clerk_org_id,
+            provider_user_ids=provider_ids,
+        )
+    except FindingOwnershipPresenceUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to verify organization membership",
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to verify organization membership",
+        ) from exc
+
+    requested_provider_ids = frozenset(provider_ids)
+    if not isinstance(present, frozenset) or not present.issubset(
+        requested_provider_ids
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to verify organization membership",
+        )
+    if present != requested_provider_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Assignee must be a current organization member",
+        )
+    return {user.id: user for user in users}
 
 
 def warm_local_org_membership(
