@@ -35,6 +35,7 @@ RESOLVED = "Resolved findings cannot change follow-up ownership or due date"
 STALE = "Assignee must be a current organization member"
 WEB_ROOT = Path(__file__).resolve().parents[2] / "web"
 DATETIME_SCRIPT = WEB_ROOT / "scripts" / "assert-datetime-local.mjs"
+M51_SCRIPT = WEB_ROOT / "scripts" / "assert-conditional-follow-up-writes.mjs"
 M47_MODAL = (
     WEB_ROOT / "app" / "(app)" / "dashboard" / "finding-follow-up-due-modal.tsx"
 )
@@ -438,7 +439,7 @@ def test_null_owner_due_change_skips_membership_and_keeps_null_owner(
     assert changes[0].new_assigned_to_user_id is None
 
 
-def test_m47_client_files_pin_conditional_helper_and_legacy_m45():
+def test_single_finding_clients_pin_conditional_helpers():
     modal = M47_MODAL.read_text()
     api = API_TS.read_text()
     m45 = M45_MODAL.read_text()
@@ -449,12 +450,12 @@ def test_m47_client_files_pin_conditional_helper_and_legacy_m45():
     assert "updateFindingFollowUp(" not in modal
     assert "updateFindingFollowUpConditionally" not in modal
     assert "expected_follow_up:" in modal
-    assert "updateFindingFollowUp(" in m45
+    assert "updateFindingFollowUp(" not in m45
     assert "updateFindingFollowUpConditionally" not in m45
-    assert "expected_follow_up" not in m45
-    assert "updateFindingFollowUp(" in findings
-    assert "updateFindingFollowUpConditionally" not in findings
-    assert "expected_follow_up" not in findings
+    assert "updateFindingOwnershipConditionally" in m45
+    assert "updateFindingFollowUp(" not in findings
+    assert "updateFindingFollowUpConditionally" in findings
+    assert "expected_follow_up" in findings
 
 
 def test_m47_request_body_shape_is_owner_due_and_expected_object(
@@ -491,11 +492,46 @@ def test_m47_request_body_shape_is_owner_due_and_expected_object(
     assert row.follow_up_due_at == datetime(2026, 11, 1, 16, 30, tzinfo=UTC)
 
 
+def test_conditional_combined_owner_due_write_emits_one_history_and_audit(
+    client, make_token, seed_user_a, fake_clerk, db_session
+):
+    ctx = _setup(client, make_token, seed_user_a, fake_clerk)
+    finding = _finding(db_session, organization_id=ctx["org_id"], user_id=ctx["admin_id"])
+    history_before = _follow_up_history_count(db_session)
+    audit_before = _follow_up_audit_count(db_session)
+
+    changed = _put_follow_up(
+        client,
+        ctx["token"],
+        finding.id,
+        _conditional(str(ctx["member_id"]), "2026-11-01T16:30:00Z", None, None),
+    )
+
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["owner"]["user_id"] == str(ctx["member_id"])
+    assert _follow_up_history_count(db_session) == history_before + 1
+    assert _follow_up_audit_count(db_session) == audit_before + 1
+
+
 def test_datetime_local_helper_contract():
     assert DATETIME_SCRIPT.is_file(), DATETIME_SCRIPT
     env = {**os.environ, "TZ": "America/New_York"}
     result = subprocess.run(
         ["node", str(DATETIME_SCRIPT)],
+        cwd=str(WEB_ROOT),
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_m51_conditional_follow_up_write_contract():
+    assert M51_SCRIPT.is_file(), M51_SCRIPT
+    env = {**os.environ, "TZ": "America/Los_Angeles"}
+    result = subprocess.run(
+        ["node", str(M51_SCRIPT)],
         cwd=str(WEB_ROOT),
         env=env,
         check=False,

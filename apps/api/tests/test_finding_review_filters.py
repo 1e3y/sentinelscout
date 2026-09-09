@@ -450,8 +450,9 @@ def test_m48_frontend_snapshot_contract():
         WEB_ROOT / "app" / "(app)" / "dashboard" / "finding-review-filters.tsx"
     ).read_text()
     api = (WEB_ROOT / "lib" / "api.ts").read_text()
-    assert "updateFindingFollowUp(" in modal_m45
-    assert "expected_follow_up" not in modal_m45
+    assert "updateFindingFollowUp(" not in modal_m45
+    assert "updateFindingOwnershipConditionally" in modal_m45
+    assert "handleTransportUncertain" in m44
     assert "writeFindingFollowUpDueConditionally" in modal_m47
     assert "shouldApplyReviewResult" in m44
     assert "shouldApplyReviewResult" in m46

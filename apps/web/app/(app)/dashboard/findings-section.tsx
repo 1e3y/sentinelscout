@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { FindingFollowUpReviewPanel } from "./finding-follow-up-review-panel";
 import { FindingOwnershipReviewPanel } from "./finding-ownership-review-panel";
 import { FindingsInboxPanel } from "./findings-inbox-panel";
@@ -19,6 +19,12 @@ type Props = {
 export function FindingsSection({ enabled, isAdmin, organizationId }: Props) {
   const [selectedFindingId, setSelectedFindingId] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+
+  useEffect(() => {
+    // Organization selection is external context; clear only after it changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelectedFindingId(null);
+  }, [organizationId]);
 
   return (
     <>
@@ -45,6 +51,8 @@ export function FindingsSection({ enabled, isAdmin, organizationId }: Props) {
         </>
       ) : null}
       <FindingsPanel
+        key={`${organizationId ?? "no-org"}:${selectedFindingId ?? "no-finding"}`}
+        organizationId={organizationId}
         findingId={selectedFindingId}
         onFindingChanged={() => setReloadToken((value) => value + 1)}
       />

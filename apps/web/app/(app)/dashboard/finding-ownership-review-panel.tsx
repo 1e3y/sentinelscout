@@ -21,6 +21,7 @@ import {
 import { organizationMemberLabel } from "@/lib/organization-member-label";
 import {
   ownershipRefreshCursor,
+  sameReviewCollection,
   shouldApplyReviewResult,
   type OwnershipReviewRequestSnapshot,
 } from "@/lib/review-request-snapshot";
@@ -333,6 +334,42 @@ export function FindingOwnershipReviewPanel({
     });
   }, [refreshAfterMutation]);
 
+  const handleTransportUncertain = useCallback(async () => {
+    const opened = openedPageRef.current;
+    const live = viewRef.current;
+    if (
+      !mountedRef.current ||
+      opened == null ||
+      opened.generation !== generationRef.current ||
+      live.generation !== generationRef.current ||
+      !sameReviewCollection(opened, live)
+    ) {
+      return;
+    }
+    setSuccess(null);
+    setRefreshWarning(null);
+    setNotice(
+      "The assignment outcome could not be confirmed. Ownership review was refreshed.",
+    );
+    setError(null);
+    try {
+      await refreshAfterMutation();
+    } catch {
+      const current = viewRef.current;
+      if (
+        !mountedRef.current ||
+        opened.generation !== generationRef.current ||
+        current.generation !== generationRef.current ||
+        !sameReviewCollection(opened, current)
+      ) {
+        return;
+      }
+      setRefreshWarning(
+        "The assignment outcome could not be confirmed, and ownership review could not be refreshed.",
+      );
+    }
+  }, [refreshAfterMutation]);
+
   const handleBulkWriteSucceeded = useCallback(async () => {
     setSuccess("Selected findings assigned.");
     setRefreshWarning(null);
@@ -595,6 +632,7 @@ export function FindingOwnershipReviewPanel({
           onWriteSucceeded={handleWriteSucceeded}
           onAlreadyOwner={handleAlreadyOwner}
           onResolvedConflict={handleResolvedConflict}
+          onTransportUncertain={handleTransportUncertain}
         />
       ) : null}
 

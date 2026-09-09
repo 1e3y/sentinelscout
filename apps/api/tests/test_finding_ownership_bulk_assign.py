@@ -1002,7 +1002,7 @@ def test_m49_frontend_selection_and_transport_contract():
     assert "setSelectedIds(payload.items" not in panel
 
 
-def test_m45_write_path_is_unchanged():
+def test_m45_write_path_is_conditional_without_changing_backend_transaction():
     m45 = (
         WEB_ROOT / "app" / "(app)" / "dashboard" / "finding-ownership-assign-modal.tsx"
     ).read_text()
@@ -1013,7 +1013,8 @@ def test_m45_write_path_is_unchanged():
         / "findings"
         / "follow_up.py"
     ).read_text()
-    assert "expected_follow_up" not in m45
+    assert "updateFindingOwnershipConditionally" in m45
+    assert "updateFindingFollowUp(" not in m45
     assert "def update_finding_follow_up(" in follow_up
     assert "db.commit()" in inspect.getsource(
         __import__(

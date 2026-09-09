@@ -1,8 +1,9 @@
 "use client";
 
 import { useAuth } from "@clerk/nextjs";
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { FindingActivityTimeline } from "./finding-activity-timeline";
+import { isTransportAmbiguousError, parseApiError } from "@/lib/api-error";
 import {
   fetchFinding,
   fetchFindingFollowUpReminderHistory,
@@ -13,7 +14,8 @@ import {
   queueFindingRetest,
   recordFindingRemediation,
   startFindingRemediation,
-  updateFindingFollowUp,
+  updateFindingFollowUpConditionally,
+  type FindingFollowUp,
   type FindingFollowUpReminderHistoryItem,
   type FindingFollowUpReminderStatus,
   type FindingResponse,
@@ -21,11 +23,39 @@ import {
   type OrganizationMember,
   type ReminderCustomerState,
 } from "@/lib/api";
+import {
+  LOCAL_TIMEZONE_LABEL,
+  formatLocalDateTimeInput,
+  formatLocalDuePreview,
+  localDateTimeMessage,
+  parseLocalDateTimeInput,
+} from "@/lib/datetime-local";
 
 type Props = {
+  organizationId: string | null;
   findingId: string | null;
   onFindingChanged: () => void;
 };
+
+type RequestIdentity = {
+  organizationId: string | null;
+  findingId: string | null;
+  generation: number;
+};
+
+const FOLLOW_UP_UPDATE_FAILED = "Failed to save follow-up";
+const FOLLOW_UP_CHANGED = "Finding follow-up changed. Refresh and try again.";
+const RESOLVED_API =
+  "Resolved findings cannot change follow-up ownership or due date";
+const RESOLVED_CLIENT = "This finding can no longer be updated.";
+const STALE_OWNER_API = "Assignee must be a current organization member";
+const STALE_OWNER =
+  "This assignee is no longer eligible. Choose a current organization member.";
+const PROVIDER_UNAVAILABLE_API = "Failed to verify organization membership";
+const PROVIDER_UNAVAILABLE =
+  "Organization membership could not be verified. Try again later.";
+const TRANSPORT_UNCERTAIN =
+  "We couldn't confirm whether the follow-up was saved. The current state was refreshed; review it before trying again.";
 
 function formatTime(value: string | null | undefined): string {
   if (!value) return "—";
@@ -88,14 +118,24 @@ function reminderStateLabel(state: ReminderCustomerState): string {
  * collection lives in FindingsInboxPanel; this panel never lists findings, so
  * the dashboard cannot show two lists with different org scopes.
  */
-export function FindingsPanel({ findingId, onFindingChanged }: Props) {
+export function FindingsPanel({
+  organizationId,
+  findingId,
+  onFindingChanged,
+}: Props) {
   const { getToken } = useAuth();
+  const mountedRef = useRef(false);
+  const organizationIdRef = useRef<string | null>(organizationId);
+  const findingIdRef = useRef<string | null>(findingId);
+  const generationRef = useRef(0);
+  const paginationCursorRef = useRef<string | null>(null);
   const [selected, setSelected] = useState<FindingResponse | null>(null);
   const [timeline, setTimeline] = useState<FindingTimelineResponse | null>(null);
   const [remediationSummary, setRemediationSummary] = useState("");
   const [members, setMembers] = useState<OrganizationMember[]>([]);
   const [ownerDraft, setOwnerDraft] = useState("");
   const [dueDraft, setDueDraft] = useState("");
+  const [dueDirty, setDueDirty] = useState(false);
   const [reminderStatus, setReminderStatus] =
     useState<FindingFollowUpReminderStatus | null>(null);
   const [reminderHistory, setReminderHistory] = useState<
@@ -103,28 +143,81 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
   >([]);
   const [showReminderHistory, setShowReminderHistory] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
+  const [pending, setPending] = useState(false);
 
   const retestActive = timeline?.current_retest_state === "in_progress";
 
-  const load = useCallback(() => {
-    startTransition(async () => {
-      setError(null);
-      setMessage(null);
-      if (!findingId) {
-        setSelected(null);
-        setTimeline(null);
-        setRemediationSummary("");
-        setOwnerDraft("");
-        setDueDraft("");
-        setReminderStatus(null);
-        setReminderHistory([]);
-        setShowReminderHistory(false);
-        return;
-      }
+  const isIdentityCurrent = useCallback((identity: RequestIdentity) => {
+    return (
+      mountedRef.current &&
+      organizationIdRef.current === identity.organizationId &&
+      findingIdRef.current === identity.findingId &&
+      generationRef.current === identity.generation
+    );
+  }, []);
+
+  const resetDrafts = useCallback((finding: FindingResponse) => {
+    setOwnerDraft(finding.follow_up?.owner?.user_id ?? "");
+    setDueDraft(
+      finding.follow_up?.follow_up_due_at
+        ? formatLocalDateTimeInput(finding.follow_up.follow_up_due_at)
+        : "",
+    );
+    setDueDirty(false);
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      generationRef.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
+    const generation = generationRef.current + 1;
+    generationRef.current = generation;
+    organizationIdRef.current = organizationId;
+    findingIdRef.current = findingId;
+    paginationCursorRef.current = null;
+    const identity: RequestIdentity = {
+      organizationId,
+      findingId,
+      generation,
+    };
+
+    // This effect is the identity boundary for externally selected context.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelected(null);
+    setTimeline(null);
+    setMembers([]);
+    setReminderStatus(null);
+    setReminderHistory([]);
+    setShowReminderHistory(false);
+    setRemediationSummary("");
+    setOwnerDraft("");
+    setDueDraft("");
+    setDueDirty(false);
+    setMessage(null);
+    setNotice(null);
+    setError(null);
+    setPending(false);
+
+    if (!organizationId || !findingId) {
+      return () => {
+        if (generationRef.current === generation) {
+          generationRef.current += 1;
+        }
+      };
+    }
+
+    setPending(true);
+    void (async () => {
       try {
         const token = await getToken();
+        if (!isIdentityCurrent(identity)) return;
         if (!token) {
           setError("Missing session token");
           return;
@@ -135,28 +228,70 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
           fetchOrganizationMembers(token, { page_size: 100 }),
           fetchFindingFollowUpReminderStatus(token, findingId),
         ]);
+        if (!isIdentityCurrent(identity)) return;
         setSelected(finding);
         setTimeline(activity);
         setMembers(memberPage.items);
         setReminderStatus(reminder);
-        setRemediationSummary("");
-        setOwnerDraft(finding.follow_up?.owner?.user_id ?? "");
-        setDueDraft(
-          finding.follow_up?.follow_up_due_at
-            ? new Date(finding.follow_up.follow_up_due_at)
-                .toISOString()
-                .slice(0, 16)
-            : "",
-        );
+        resetDrafts(finding);
       } catch (err) {
+        if (!isIdentityCurrent(identity)) return;
         setError(err instanceof Error ? err.message : "Failed to load finding");
+      } finally {
+        if (isIdentityCurrent(identity)) {
+          setPending(false);
+        }
       }
-    });
-  }, [findingId, getToken]);
+    })();
 
-  useEffect(() => {
-    load();
-  }, [load]);
+    return () => {
+      if (generationRef.current === generation) {
+        generationRef.current += 1;
+      }
+      paginationCursorRef.current = null;
+    };
+  }, [
+    findingId,
+    getToken,
+    isIdentityCurrent,
+    organizationId,
+    resetDrafts,
+  ]);
+
+  function identityForFinding(id: string): RequestIdentity | null {
+    const identity = {
+      organizationId: organizationIdRef.current,
+      findingId: id,
+      generation: generationRef.current,
+    };
+    return isIdentityCurrent(identity) ? identity : null;
+  }
+
+  async function reconcileCurrent(
+    identity: RequestIdentity,
+    token: string,
+    retainDrafts: boolean,
+  ): Promise<boolean> {
+    try {
+      const [finding, activity, reminder] = await Promise.all([
+        fetchFinding(token, identity.findingId!),
+        fetchFindingTimeline(token, identity.findingId!),
+        fetchFindingFollowUpReminderStatus(token, identity.findingId!),
+      ]);
+      if (!isIdentityCurrent(identity)) return false;
+      setSelected(finding);
+      setTimeline(activity);
+      setReminderStatus(reminder);
+      setReminderHistory([]);
+      setShowReminderHistory(false);
+      if (!retainDrafts) resetDrafts(finding);
+      if (!isIdentityCurrent(identity)) return false;
+      onFindingChanged();
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   function runAction(
     action: (token: string, id: string) => Promise<unknown>,
@@ -164,153 +299,323 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
     failureMessage: string,
   ) {
     if (!selected) return;
-    startTransition(async () => {
-      setError(null);
-      setMessage(null);
+    const identity = identityForFinding(selected.id);
+    if (!identity) return;
+    setPending(true);
+    setError(null);
+    setNotice(null);
+    setMessage(null);
+    void (async () => {
       try {
         const token = await getToken();
+        if (!isIdentityCurrent(identity)) return;
         if (!token) {
           setError("Missing session token");
           return;
         }
-        await action(token, selected.id);
-        setMessage(successMessage);
+        await action(token, identity.findingId!);
+        if (!isIdentityCurrent(identity)) return;
         const [finding, activity] = await Promise.all([
-          fetchFinding(token, selected.id),
-          fetchFindingTimeline(token, selected.id),
+          fetchFinding(token, identity.findingId!),
+          fetchFindingTimeline(token, identity.findingId!),
         ]);
+        if (!isIdentityCurrent(identity)) return;
         setSelected(finding);
         setTimeline(activity);
+        resetDrafts(finding);
+        setMessage(successMessage);
+        if (!isIdentityCurrent(identity)) return;
         onFindingChanged();
       } catch (err) {
+        if (!isIdentityCurrent(identity)) return;
         setError(err instanceof Error ? err.message : failureMessage);
+      } finally {
+        if (isIdentityCurrent(identity)) {
+          setPending(false);
+        }
       }
-    });
+    })();
   }
 
   function saveRemediationRevision() {
     if (!selected) return;
+    const identity = identityForFinding(selected.id);
+    if (!identity) return;
     const summary = remediationSummary.trim();
     if (!summary) {
       setError("Remediation summary is required");
       return;
     }
-    startTransition(async () => {
-      setError(null);
-      setMessage(null);
+    setPending(true);
+    setError(null);
+    setNotice(null);
+    setMessage(null);
+    void (async () => {
       try {
         const token = await getToken();
+        if (!isIdentityCurrent(identity)) return;
         if (!token) {
           setError("Missing session token");
           return;
         }
-        await recordFindingRemediation(token, selected.id, summary);
-        setMessage("Remediation revision recorded");
-        setRemediationSummary("");
+        await recordFindingRemediation(token, identity.findingId!, summary);
+        if (!isIdentityCurrent(identity)) return;
         const [finding, activity] = await Promise.all([
-          fetchFinding(token, selected.id),
-          fetchFindingTimeline(token, selected.id),
+          fetchFinding(token, identity.findingId!),
+          fetchFindingTimeline(token, identity.findingId!),
         ]);
+        if (!isIdentityCurrent(identity)) return;
         setSelected(finding);
         setTimeline(activity);
+        resetDrafts(finding);
+        setRemediationSummary("");
+        setMessage("Remediation revision recorded");
+        if (!isIdentityCurrent(identity)) return;
         onFindingChanged();
       } catch (err) {
+        if (!isIdentityCurrent(identity)) return;
         setError(
           err instanceof Error ? err.message : "Failed to record remediation",
         );
+      } finally {
+        if (isIdentityCurrent(identity)) {
+          setPending(false);
+        }
       }
-    });
+    })();
   }
 
   function saveFollowUp() {
     if (!selected || selected.status === "resolved") return;
-    startTransition(async () => {
-      setError(null);
-      setMessage(null);
+    const identity = identityForFinding(selected.id);
+    if (!identity) return;
+    const authoritativeOwner = selected.follow_up?.owner?.user_id ?? null;
+    const authoritativeDue = selected.follow_up?.follow_up_due_at ?? null;
+    let desiredDue = authoritativeDue;
+    if (dueDirty) {
+      if (!dueDraft) {
+        desiredDue = null;
+      } else {
+        const parsed = parseLocalDateTimeInput(dueDraft);
+        if (!parsed.ok) {
+          setError(localDateTimeMessage(parsed.reason));
+          setNotice(null);
+          setMessage(null);
+          return;
+        }
+        desiredDue = parsed.iso;
+      }
+    }
+
+    setPending(true);
+    setError(null);
+    setNotice(null);
+    setMessage(null);
+    void (async () => {
+      let token: string | null = null;
+      let writeStarted = false;
+      let writtenFollowUp: FindingFollowUp | null = null;
       try {
-        const token = await getToken();
+        token = await getToken();
+        if (!isIdentityCurrent(identity)) return;
         if (!token) {
           setError("Missing session token");
           return;
         }
-        const followUp = await updateFindingFollowUp(token, selected.id, {
-          assigned_to_user_id: ownerDraft || null,
-          follow_up_due_at: dueDraft
-            ? new Date(dueDraft).toISOString()
-            : null,
-        });
-        setSelected({ ...selected, follow_up: followUp });
-        setMessage("Follow-up saved");
+        writeStarted = true;
+        writtenFollowUp = await updateFindingFollowUpConditionally(
+          token,
+          identity.findingId!,
+          {
+            assigned_to_user_id: ownerDraft || null,
+            follow_up_due_at: desiredDue,
+            expected_follow_up: {
+              assigned_to_user_id: authoritativeOwner,
+              follow_up_due_at: authoritativeDue,
+            },
+          },
+        );
+      } catch (err) {
+        if (!isIdentityCurrent(identity)) return;
+        if (writeStarted && isTransportAmbiguousError(err)) {
+          if (token) {
+            await reconcileCurrent(identity, token, true);
+          }
+          if (!isIdentityCurrent(identity)) return;
+          setError(null);
+          setNotice(TRANSPORT_UNCERTAIN);
+          return;
+        }
+
+        const parsed = parseApiError(err, FOLLOW_UP_UPDATE_FAILED);
+        if (parsed.status === 409 && parsed.message === FOLLOW_UP_CHANGED) {
+          if (token) {
+            await reconcileCurrent(identity, token, true);
+          }
+          if (!isIdentityCurrent(identity)) return;
+          setError(null);
+          setNotice(FOLLOW_UP_CHANGED);
+          return;
+        }
+        if (parsed.status === 409 && parsed.message === RESOLVED_API) {
+          if (token) {
+            await reconcileCurrent(identity, token, false);
+          }
+          if (!isIdentityCurrent(identity)) return;
+          setError(RESOLVED_CLIENT);
+          return;
+        }
+        if (parsed.status === 400 && parsed.message === STALE_OWNER_API) {
+          setError(STALE_OWNER);
+          return;
+        }
+        if (
+          parsed.status === 502 &&
+          parsed.message === PROVIDER_UNAVAILABLE_API
+        ) {
+          setError(PROVIDER_UNAVAILABLE);
+          return;
+        }
+        setError(parsed.message);
+        return;
+      }
+
+      if (!token || !writtenFollowUp || !isIdentityCurrent(identity)) return;
+      const authoritativeFollowUp = writtenFollowUp;
+      try {
         const [activity, reminder] = await Promise.all([
-          fetchFindingTimeline(token, selected.id),
-          fetchFindingFollowUpReminderStatus(token, selected.id),
+          fetchFindingTimeline(token, identity.findingId!),
+          fetchFindingFollowUpReminderStatus(token, identity.findingId!),
         ]);
+        if (!isIdentityCurrent(identity)) return;
+        setSelected((current) => {
+          if (!current || !isIdentityCurrent(identity)) return current;
+          return { ...current, follow_up: authoritativeFollowUp };
+        });
         setTimeline(activity);
         setReminderStatus(reminder);
         setReminderHistory([]);
         setShowReminderHistory(false);
+        setOwnerDraft(authoritativeFollowUp.owner?.user_id ?? "");
+        setDueDraft(
+          authoritativeFollowUp.follow_up_due_at
+            ? formatLocalDateTimeInput(authoritativeFollowUp.follow_up_due_at)
+            : "",
+        );
+        setDueDirty(false);
+        setMessage("Follow-up saved");
+        if (!isIdentityCurrent(identity)) return;
         onFindingChanged();
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to save follow-up");
+        if (!isIdentityCurrent(identity)) return;
+        setError(
+          parseApiError(
+            err,
+            "Follow-up was saved, but the finding could not be refreshed.",
+          ).message,
+        );
+        if (!isIdentityCurrent(identity)) return;
+        onFindingChanged();
+      }
+    })().finally(() => {
+      if (isIdentityCurrent(identity)) {
+        setPending(false);
       }
     });
   }
 
   function loadReminderHistory() {
     if (!selected) return;
-    startTransition(async () => {
-      setError(null);
+    const identity = identityForFinding(selected.id);
+    if (!identity) return;
+    setPending(true);
+    setError(null);
+    setNotice(null);
+    void (async () => {
       try {
         const token = await getToken();
+        if (!isIdentityCurrent(identity)) return;
         if (!token) {
           setError("Missing session token");
           return;
         }
         const history = await fetchFindingFollowUpReminderHistory(
           token,
-          selected.id,
+          identity.findingId!,
           { page_size: 20 },
         );
+        if (!isIdentityCurrent(identity)) return;
         setReminderHistory(history.items);
         setShowReminderHistory(true);
       } catch (err) {
+        if (!isIdentityCurrent(identity)) return;
         setError(
           err instanceof Error ? err.message : "Failed to load reminder history",
         );
+      } finally {
+        if (isIdentityCurrent(identity)) {
+          setPending(false);
+        }
       }
-    });
+    })();
   }
 
   function loadMoreActivity() {
     if (!selected || !timeline?.next_cursor) return;
-    startTransition(async () => {
-      setError(null);
+    const identity = identityForFinding(selected.id);
+    if (!identity) return;
+    const cursor = timeline.next_cursor;
+    if (paginationCursorRef.current === cursor) return;
+    paginationCursorRef.current = cursor;
+    setPending(true);
+    setError(null);
+    setNotice(null);
+    void (async () => {
       try {
         const token = await getToken();
+        if (!isIdentityCurrent(identity)) return;
         if (!token) {
           setError("Missing session token");
           return;
         }
-        const next = await fetchFindingTimeline(token, selected.id, {
-          cursor: timeline.next_cursor,
+        const next = await fetchFindingTimeline(token, identity.findingId!, {
+          cursor,
         });
-        setTimeline((current) =>
-          current
+        if (!isIdentityCurrent(identity)) return;
+        setTimeline((current) => {
+          if (!isIdentityCurrent(identity)) return current;
+          return current
             ? {
                 ...next,
                 events: [...current.events, ...next.events],
               }
-            : next,
-        );
+            : next;
+        });
       } catch (err) {
+        if (!isIdentityCurrent(identity)) return;
         setError(
           err instanceof Error ? err.message : "Failed to load finding activity",
         );
+      } finally {
+        if (
+          isIdentityCurrent(identity) &&
+          paginationCursorRef.current === cursor
+        ) {
+          paginationCursorRef.current = null;
+          setPending(false);
+        }
       }
-    });
+    })();
   }
 
   const remediationCharacterCount = Array.from(remediationSummary).length;
+  const parsedDueDraft = dueDraft
+    ? parseLocalDateTimeInput(dueDraft)
+    : null;
+  const dueDraftError =
+    dueDirty && parsedDueDraft && !parsedDueDraft.ok
+      ? localDateTimeMessage(parsedDueDraft.reason)
+      : null;
   const remediationCanSave =
     remediationSummary.trim().length > 0 &&
     remediationCharacterCount <= 4000 &&
@@ -342,6 +647,11 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
       {message ? (
         <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
           {message}
+        </p>
+      ) : null}
+      {notice ? (
+        <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          {notice}
         </p>
       ) : null}
 
@@ -492,7 +802,12 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
                     className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
                     value={ownerDraft}
                     disabled={pending}
-                    onChange={(event) => setOwnerDraft(event.target.value)}
+                    onChange={(event) => {
+                      setOwnerDraft(event.target.value);
+                      setError(null);
+                      setNotice(null);
+                      setMessage(null);
+                    }}
                   >
                     <option value="">Unassigned</option>
                     {members.map((member) => (
@@ -520,8 +835,27 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
                     className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
                     value={dueDraft}
                     disabled={pending}
-                    onChange={(event) => setDueDraft(event.target.value)}
+                    onChange={(event) => {
+                      setDueDraft(event.target.value);
+                      setDueDirty(true);
+                      setError(null);
+                      setNotice(null);
+                      setMessage(null);
+                    }}
                   />
+                  <span className="mt-1 block text-zinc-500">
+                    {LOCAL_TIMEZONE_LABEL}
+                  </span>
+                  {parsedDueDraft?.ok ? (
+                    <span className="mt-1 block text-zinc-700">
+                      {formatLocalDuePreview(parsedDueDraft.iso)}
+                    </span>
+                  ) : null}
+                  {dueDraftError ? (
+                    <span className="mt-1 block text-red-700">
+                      {dueDraftError}
+                    </span>
+                  ) : null}
                 </label>
                 <div className="sm:col-span-2">
                   {dueWording(
@@ -539,7 +873,7 @@ export function FindingsPanel({ findingId, onFindingChanged }: Props) {
                   <button
                     type="button"
                     className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm disabled:opacity-50"
-                    disabled={pending}
+                    disabled={pending || Boolean(dueDraftError)}
                     onClick={saveFollowUp}
                   >
                     Save follow-up

@@ -7,10 +7,10 @@ import { parseApiError } from "@/lib/api-error";
 import {
   fetchFinding,
   fetchOrganizationMembers,
-  updateFindingFollowUp,
   type FindingOwnershipAssignmentState,
   type OrganizationMember,
 } from "@/lib/api";
+import { isTransportAmbiguousError } from "@/lib/api-error";
 import {
   projectInlineOwnershipSnapshot,
   snapshotsDueEqual,
@@ -21,15 +21,27 @@ import {
   organizationMemberLabel,
   organizationMemberPickerLabel,
 } from "@/lib/organization-member-label";
+import { updateFindingOwnershipConditionally } from "@/lib/update-finding-ownership-conditional";
 
 const MEMBER_PAGE_SIZE = 50;
 const FINDING_READ_FAILED = "This finding could not be loaded.";
 const OWNERSHIP_UPDATE_FAILED = "Finding ownership could not be updated.";
 const RESOLVED_CLIENT = "This finding can no longer be updated.";
 const OWNER_DRIFT =
-  "The current finding owner changed. Review the latest state and choose an owner again.";
+  "The current finding owner changed. Review the latest state, then save again to apply your selected owner.";
 const DUE_DRIFT =
-  "The follow-up due date changed. Review the latest date before saving the owner change.";
+  "The follow-up due date changed. Review the latest date, then save again to apply your selected owner.";
+const FOLLOW_UP_CHANGED = "Finding follow-up changed. Refresh and try again.";
+const RESOLVED_API =
+  "Resolved findings cannot change follow-up ownership or due date";
+const STALE_OWNER_API = "Assignee must be a current organization member";
+const STALE_OWNER =
+  "This assignee is no longer eligible. Choose a current organization member.";
+const PROVIDER_UNAVAILABLE_API = "Failed to verify organization membership";
+const PROVIDER_UNAVAILABLE =
+  "Organization membership could not be verified. Try again later.";
+const TRANSPORT_UNCERTAIN =
+  "We couldn't confirm whether the owner was updated. The current state was refreshed; review it before trying again.";
 
 export type OwnershipAssignIntent = {
   findingId: string;
@@ -44,6 +56,7 @@ type Props = {
   onWriteSucceeded: () => Promise<void>;
   onAlreadyOwner: () => Promise<void>;
   onResolvedConflict: () => void;
+  onTransportUncertain: () => Promise<void>;
 };
 
 function formatDue(value: string | null): string {
@@ -71,6 +84,7 @@ export function FindingOwnershipAssignModal({
   onWriteSucceeded,
   onAlreadyOwner,
   onResolvedConflict,
+  onTransportUncertain,
 }: Props) {
   const { getToken } = useAuth();
   const generationRef = useRef(0);
@@ -176,6 +190,8 @@ export function FindingOwnershipAssignModal({
     if (!intent || !snapshot || mutationDisabled) return;
     if (!selectedUserId || saveInFlightRef.current) return;
     const generation = generationRef.current;
+    const currentIntent = intent;
+    const proposedOwnerUserId = selectedUserId;
     saveInFlightRef.current = true;
     setSaving(true);
     setError(null);
@@ -187,7 +203,14 @@ export function FindingOwnershipAssignModal({
         setError("Missing session token");
         return;
       }
-      const finding = await fetchFinding(token, intent.findingId);
+      let finding;
+      try {
+        finding = await fetchFinding(token, currentIntent.findingId);
+      } catch (err) {
+        if (generationRef.current !== generation) return;
+        setError(parseApiError(err, FINDING_READ_FAILED).message);
+        return;
+      }
       if (generationRef.current !== generation) return;
       const fresh = projectInlineOwnershipSnapshot(finding);
 
@@ -201,18 +224,31 @@ export function FindingOwnershipAssignModal({
 
       if (!snapshotsOwnerEqual(snapshot, fresh)) {
         setSnapshot(fresh);
-        setSelectedUserId("");
+        if (proposedOwnerUserId === fresh.owner_user_id) {
+          await onAlreadyOwner();
+          if (generationRef.current === generation) {
+            onClose();
+          }
+          return;
+        }
         setNotice(OWNER_DRIFT);
         return;
       }
 
       if (!snapshotsDueEqual(snapshot, fresh)) {
         setSnapshot(fresh);
+        if (proposedOwnerUserId === fresh.owner_user_id) {
+          await onAlreadyOwner();
+          if (generationRef.current === generation) {
+            onClose();
+          }
+          return;
+        }
         setNotice(DUE_DRIFT);
         return;
       }
 
-      if (selectedUserId === fresh.owner_user_id) {
+      if (proposedOwnerUserId === fresh.owner_user_id) {
         setSnapshot(fresh);
         await onAlreadyOwner();
         if (generationRef.current === generation) {
@@ -221,13 +257,80 @@ export function FindingOwnershipAssignModal({
         return;
       }
 
-      // M33 remains last-write-wins (SELECT FOR UPDATE). M45 does not add
-      // ETag/version/precondition concurrency; a residual GET→PUT race can still
-      // apply the last accepted snapshot against a later write.
-      await updateFindingFollowUp(token, intent.findingId, {
-        assigned_to_user_id: selectedUserId,
-        follow_up_due_at: fresh.follow_up_due_at,
-      });
+      try {
+        await updateFindingOwnershipConditionally({
+          token,
+          findingId: currentIntent.findingId,
+          proposedOwnerUserId,
+          authoritativeOwnerUserId: fresh.owner_user_id,
+          authoritativeDueAt: fresh.follow_up_due_at,
+        });
+      } catch (err) {
+        // The write can commit after this modal was replaced. Fence every old
+        // modal before applying copy, callbacks, refreshes, or close effects.
+        if (generationRef.current !== generation) return;
+        const parsed = parseApiError(err, OWNERSHIP_UPDATE_FAILED);
+        const concurrency =
+          parsed.status === 409 && parsed.message === FOLLOW_UP_CHANGED;
+        const transportUncertain = isTransportAmbiguousError(err);
+
+        if (concurrency || transportUncertain) {
+          try {
+            const refreshed = await fetchFinding(token, currentIntent.findingId);
+            if (generationRef.current !== generation) return;
+            const refreshedSnapshot = projectInlineOwnershipSnapshot(refreshed);
+            setSnapshot(refreshedSnapshot);
+            if (refreshedSnapshot.status === "resolved") {
+              setMutationDisabled(true);
+              setError(RESOLVED_CLIENT);
+              onResolvedConflict();
+              return;
+            }
+            if (
+              concurrency &&
+              proposedOwnerUserId === refreshedSnapshot.owner_user_id
+            ) {
+              await onAlreadyOwner();
+              if (generationRef.current === generation) {
+                onClose();
+              }
+              return;
+            }
+          } catch {
+            if (generationRef.current !== generation) return;
+          }
+
+          if (transportUncertain) {
+            if (generationRef.current !== generation) return;
+            setNotice(TRANSPORT_UNCERTAIN);
+            await onTransportUncertain();
+            return;
+          }
+          setNotice(FOLLOW_UP_CHANGED);
+          return;
+        }
+
+        if (parsed.status === 409 && parsed.message === RESOLVED_API) {
+          setMutationDisabled(true);
+          setError(RESOLVED_CLIENT);
+          onResolvedConflict();
+          return;
+        }
+        if (parsed.status === 400 && parsed.message === STALE_OWNER_API) {
+          setError(STALE_OWNER);
+          return;
+        }
+        if (
+          parsed.status === 502 &&
+          parsed.message === PROVIDER_UNAVAILABLE_API
+        ) {
+          setError(PROVIDER_UNAVAILABLE);
+          return;
+        }
+        setError(parsed.message);
+        return;
+      }
+      if (generationRef.current !== generation) return;
       await onWriteSucceeded();
       if (generationRef.current === generation) {
         onClose();
