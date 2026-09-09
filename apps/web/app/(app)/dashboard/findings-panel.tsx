@@ -482,40 +482,41 @@ export function FindingsPanel({
 
       if (!token || !writtenFollowUp || !isIdentityCurrent(identity)) return;
       const authoritativeFollowUp = writtenFollowUp;
-      try {
-        const [activity, reminder] = await Promise.all([
-          fetchFindingTimeline(token, identity.findingId!),
-          fetchFindingFollowUpReminderStatus(token, identity.findingId!),
-        ]);
-        if (!isIdentityCurrent(identity)) return;
-        setSelected((current) => {
-          if (!current || !isIdentityCurrent(identity)) return current;
-          return { ...current, follow_up: authoritativeFollowUp };
-        });
-        setTimeline(activity);
-        setReminderStatus(reminder);
-        setReminderHistory([]);
-        setShowReminderHistory(false);
-        setOwnerDraft(authoritativeFollowUp.owner?.user_id ?? "");
-        setDueDraft(
-          authoritativeFollowUp.follow_up_due_at
-            ? formatLocalDateTimeInput(authoritativeFollowUp.follow_up_due_at)
-            : "",
-        );
-        setDueDirty(false);
-        setMessage("Follow-up saved");
-        if (!isIdentityCurrent(identity)) return;
-        onFindingChanged();
-      } catch (err) {
-        if (!isIdentityCurrent(identity)) return;
+      setSelected((current) => {
+        if (!current || !isIdentityCurrent(identity)) return current;
+        return { ...current, follow_up: authoritativeFollowUp };
+      });
+      setOwnerDraft(authoritativeFollowUp.owner?.user_id ?? "");
+      setDueDraft(
+        authoritativeFollowUp.follow_up_due_at
+          ? formatLocalDateTimeInput(authoritativeFollowUp.follow_up_due_at)
+          : "",
+      );
+      setDueDirty(false);
+      setReminderHistory([]);
+      setShowReminderHistory(false);
+      setMessage("Follow-up saved");
+      if (!isIdentityCurrent(identity)) return;
+      onFindingChanged();
+
+      const [activityResult, reminderResult] = await Promise.allSettled([
+        fetchFindingTimeline(token, identity.findingId!),
+        fetchFindingFollowUpReminderStatus(token, identity.findingId!),
+      ]);
+      if (!isIdentityCurrent(identity)) return;
+      if (activityResult.status === "fulfilled") {
+        setTimeline(activityResult.value);
+      }
+      if (reminderResult.status === "fulfilled") {
+        setReminderStatus(reminderResult.value);
+      }
+      if (
+        activityResult.status === "rejected" ||
+        reminderResult.status === "rejected"
+      ) {
         setError(
-          parseApiError(
-            err,
-            "Follow-up was saved, but the finding could not be refreshed.",
-          ).message,
+          "Follow-up was saved, but related detail could not be refreshed.",
         );
-        if (!isIdentityCurrent(identity)) return;
-        onFindingChanged();
       }
     })().finally(() => {
       if (isIdentityCurrent(identity)) {
@@ -796,8 +797,34 @@ export function FindingsPanel({
               </dl>
             ) : (
               <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-2 rounded-md border border-zinc-200 bg-zinc-50 p-3 sm:col-span-2">
+                  <h5 className="text-xs font-medium text-zinc-800">
+                    Current server state
+                  </h5>
+                  <dl className="grid gap-2 text-xs text-zinc-700 sm:grid-cols-2">
+                    <div>
+                      <dt className="text-zinc-500">Current owner</dt>
+                      <dd>
+                        {selected.follow_up?.owner
+                          ? selected.follow_up.owner.current_member
+                            ? (selected.follow_up.owner.display_name ??
+                              "Organization member")
+                            : `${selected.follow_up.owner.display_name ?? "Organization member"} (no longer a member)`
+                          : "Unassigned"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-zinc-500">Current due</dt>
+                      <dd>
+                        {selected.follow_up?.follow_up_due_at
+                          ? formatTime(selected.follow_up.follow_up_due_at)
+                          : "No due date"}
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
                 <label className="text-xs text-zinc-700">
-                  <span className="text-zinc-500">Owner</span>
+                  <span className="text-zinc-500">Proposed owner</span>
                   <select
                     className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
                     value={ownerDraft}
@@ -829,7 +856,7 @@ export function FindingsPanel({
                   </select>
                 </label>
                 <label className="text-xs text-zinc-700">
-                  <span className="text-zinc-500">Due date</span>
+                  <span className="text-zinc-500">Proposed due date</span>
                   <input
                     type="datetime-local"
                     className="mt-1 w-full rounded-md border border-zinc-300 px-2 py-1.5 text-sm"

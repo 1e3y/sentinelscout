@@ -114,6 +114,32 @@ for (const operation of [
   assert(detail.includes(operation), `detail fence coverage is missing ${operation}`);
 }
 
+const followUpUi = detail.slice(
+  detail.indexOf('className="text-sm font-medium text-zinc-800">Follow-up'),
+  detail.indexOf("{reminderStatus ?"),
+);
+for (const label of [
+  "Current server state",
+  "Current owner",
+  "Current due",
+  "Proposed owner",
+  "Proposed due date",
+]) {
+  assert(followUpUi.includes(label), `active follow-up UI is missing ${label}`);
+}
+assert(
+  followUpUi.includes("selected.follow_up?.owner") &&
+    followUpUi.includes("selected.follow_up?.follow_up_due_at") &&
+    followUpUi.includes("value={ownerDraft}") &&
+    followUpUi.includes("value={dueDraft}"),
+  "authoritative current state and proposal drafts must use separate sources",
+);
+assert(
+  followUpUi.indexOf("Current server state") <
+    followUpUi.indexOf("Proposed owner"),
+  "authoritative current state must render before proposal controls",
+);
+
 assert(
   detail.includes("let desiredDue = authoritativeDue") &&
     detail.includes("if (dueDirty)") &&
@@ -138,13 +164,47 @@ const detailSuccessReconciliation = detail.slice(
   detail.indexOf("if (!token || !writtenFollowUp"),
   detail.indexOf("function loadReminderHistory"),
 );
+const successfulApplyIndex = detailSuccessReconciliation.indexOf(
+  "setSelected((current)",
+);
+const successfulOwnerDraftIndex =
+  detailSuccessReconciliation.indexOf("setOwnerDraft(");
+const successfulDueDraftIndex =
+  detailSuccessReconciliation.indexOf("setDueDraft(");
+const timelineRefreshIndex = detailSuccessReconciliation.indexOf(
+  "fetchFindingTimeline(",
+);
+const reminderRefreshIndex = detailSuccessReconciliation.indexOf(
+  "fetchFindingFollowUpReminderStatus(",
+);
 assert(
   !detailSuccessReconciliation.includes("fetchFinding(") &&
-    detailSuccessReconciliation.includes("fetchFindingTimeline(") &&
-    detailSuccessReconciliation.includes(
-      "fetchFindingFollowUpReminderStatus(",
-    ),
+    timelineRefreshIndex !== -1 &&
+    reminderRefreshIndex !== -1,
   "detail success must reuse the PUT response without a third owner-provider read",
+);
+assert(
+  successfulApplyIndex !== -1 &&
+    successfulOwnerDraftIndex !== -1 &&
+    successfulDueDraftIndex !== -1 &&
+    successfulApplyIndex < timelineRefreshIndex &&
+    successfulOwnerDraftIndex < timelineRefreshIndex &&
+    successfulDueDraftIndex < reminderRefreshIndex,
+  "the authoritative PUT response and reset drafts must apply before secondary reads",
+);
+assert(
+  detailSuccessReconciliation.includes("Promise.allSettled(") &&
+    detailSuccessReconciliation.includes(
+      "Follow-up was saved, but related detail could not be refreshed.",
+    ) &&
+    count(detailSuccessReconciliation, "onFindingChanged()") === 1 &&
+    count(detailSuccessReconciliation, "setSelected((current)") === 1,
+  "secondary refresh failure must preserve the PUT result and invoke the parent once",
+);
+assert(
+  detail.includes("if (!retainDrafts) resetDrafts(finding);") &&
+    count(detail, "reconcileCurrent(identity, token, true)") === 2,
+  "conflict and transport reconciliation must update authority while retaining drafts",
 );
 
 const authoritativeDue = "2026-06-15T18:30:00.000Z";
@@ -165,6 +225,55 @@ assert(
   deriveDesiredDue({ dueDirty: true, dueDraft: "", parsedIso: null }) === null,
   "an explicit due clear must send null",
 );
+
+const conflictState = {
+  authoritative: { owner: "owner-old", due: "2026-06-01T12:00:00Z" },
+  ownerDraft: "owner-proposed",
+  dueDraft: "2026-07-01T09:00",
+};
+const reconcileRetainingDrafts = (state, authoritative) => ({
+  ...state,
+  authoritative,
+});
+for (const path of ["conflict", "transport"]) {
+  const reconciled = reconcileRetainingDrafts(conflictState, {
+    owner: `owner-${path}`,
+    due: "2026-08-01T12:00:00Z",
+  });
+  assert(
+    reconciled.authoritative.owner === `owner-${path}` &&
+      reconciled.ownerDraft === "owner-proposed" &&
+      reconciled.dueDraft === "2026-07-01T09:00",
+    `${path} reconciliation must replace authority without resetting proposals`,
+  );
+}
+
+const applySuccessfulWrite = (secondarySucceeded) => {
+  const state = {
+    authoritative: { owner: "owner-old", due: null },
+    ownerDraft: "owner-proposed",
+    dueDraft: "2026-09-01T08:00",
+    refreshWarning: null,
+  };
+  state.authoritative = {
+    owner: "owner-proposed",
+    due: "2026-09-01T15:00:00Z",
+  };
+  state.ownerDraft = state.authoritative.owner;
+  state.dueDraft = state.authoritative.due;
+  if (!secondarySucceeded) state.refreshWarning = "secondary refresh failed";
+  return state;
+};
+for (const failedRead of ["timeline", "reminder"]) {
+  const state = applySuccessfulWrite(false);
+  assert(
+    state.authoritative.owner === "owner-proposed" &&
+      state.authoritative.due === "2026-09-01T15:00:00Z" &&
+      state.ownerDraft === "owner-proposed" &&
+      state.refreshWarning,
+    `${failedRead} failure must not restore the pre-PUT follow-up`,
+  );
+}
 
 const current = {
   mounted: true,
