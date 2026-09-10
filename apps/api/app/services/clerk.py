@@ -320,7 +320,7 @@ class HttpClerkDirectory:
                 detail="Invalid organization member page",
             )
         response = self._client.get(
-            f"/organizations/{clerk_org_id}/organization_memberships",
+            f"/organizations/{clerk_org_id}/memberships",
             params={"limit": limit, "offset": offset},
         )
         if response.status_code >= 400:
@@ -389,7 +389,7 @@ class HttpClerkDirectory:
             raise CurrentAccessUnavailable()
         try:
             response = self._client.get(
-                f"/organizations/{clerk_org_id}/organization_memberships",
+                f"/organizations/{clerk_org_id}/memberships",
                 params={"limit": limit, "offset": offset},
             )
         except (httpx.TimeoutException, httpx.TransportError, httpx.HTTPError) as exc:
