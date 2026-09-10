@@ -1611,6 +1611,47 @@ export function bulkUpdateFindingFollowUpDue(
   );
 }
 
+export type BulkFollowUpEditItem = {
+  finding_id: string;
+  expected_follow_up: ExpectedFollowUpState;
+};
+
+export type BulkFollowUpEditRequest = {
+  assigned_to_user_id: string;
+  follow_up_due_at: string;
+  items: readonly BulkFollowUpEditItem[];
+};
+
+export type BulkFollowUpEditResponse = {
+  selected_count: number;
+  changed_count: number;
+  unchanged_count: number;
+};
+
+export function bulkEditFindingFollowUp(
+  token: string,
+  body: BulkFollowUpEditRequest,
+): Promise<BulkFollowUpEditResponse> {
+  return apiFetch<BulkFollowUpEditResponse>(
+    "/v1/findings/follow-up-review/bulk-edit",
+    token,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        assigned_to_user_id: body.assigned_to_user_id,
+        follow_up_due_at: body.follow_up_due_at,
+        items: body.items.map((item) => ({
+          finding_id: item.finding_id,
+          expected_follow_up: {
+            assigned_to_user_id: item.expected_follow_up.assigned_to_user_id,
+            follow_up_due_at: item.expected_follow_up.follow_up_due_at,
+          },
+        })),
+      }),
+    },
+  );
+}
+
 export type AlertDeliveryStatus = {
   channel: string;
   destination_key: string;

@@ -41,6 +41,9 @@ ACTION_ORGANIZATION_FINDING_FOLLOW_UP_READ = "organization.finding_follow_up.rea
 ACTION_ORGANIZATION_FINDING_FOLLOW_UP_BULK_DUE = (
     "organization.finding_follow_up.bulk_due"
 )
+ACTION_ORGANIZATION_FINDING_FOLLOW_UP_BULK_EDIT = (
+    "organization.finding_follow_up.bulk_edit"
+)
 SHARED_REPORT_COARSE_PARTITIONS = 64
 
 
@@ -78,6 +81,9 @@ def _limit_for_action(settings: Settings, action: str) -> int:
         ),
         ACTION_ORGANIZATION_FINDING_FOLLOW_UP_BULK_DUE: (
             settings.rate_limit_organization_finding_follow_up_bulk_due
+        ),
+        ACTION_ORGANIZATION_FINDING_FOLLOW_UP_BULK_EDIT: (
+            settings.rate_limit_organization_finding_follow_up_bulk_edit
         ),
     }.get(action, settings.rate_limit_operation_create)
 

@@ -26,6 +26,10 @@ from app.schemas.finding_follow_up_bulk_due import (
     BulkFollowUpDueRequest,
     BulkFollowUpDueResponse,
 )
+from app.schemas.finding_follow_up_bulk_edit import (
+    BulkFollowUpEditRequest,
+    BulkFollowUpEditResponse,
+)
 from app.schemas.finding_follow_up_reminder_status import (
     FindingFollowUpReminderHistoryResponse,
     FindingFollowUpReminderStatusResponse,
@@ -71,6 +75,7 @@ from app.services.findings.follow_up import resolve_follow_up_response
 from app.services.findings.follow_up_bulk_due import (
     bulk_update_finding_follow_up_due,
 )
+from app.services.findings.follow_up_bulk_edit import bulk_edit_finding_follow_up
 from app.services.findings.follow_up_reminder_status import (
     DEFAULT_HISTORY_PAGE_SIZE,
     MAX_HISTORY_PAGE_SIZE,
@@ -109,6 +114,7 @@ from app.services.provenance import build_finding_provenance
 from app.services.rate_limit import (
     ACTION_FINDING_FOLLOW_UP,
     ACTION_ORGANIZATION_FINDING_FOLLOW_UP_BULK_DUE,
+    ACTION_ORGANIZATION_FINDING_FOLLOW_UP_BULK_EDIT,
     ACTION_ORGANIZATION_FINDING_FOLLOW_UP_READ,
     ACTION_ORGANIZATION_FINDING_OWNERSHIP_BULK_ASSIGN,
     ACTION_ORGANIZATION_FINDING_OWNERSHIP_READ,
@@ -413,6 +419,40 @@ def bulk_update_finding_follow_up_due_endpoint(
         organization=organization,
         actor=actor,
         directory=directory,
+        follow_up_due_at=body.follow_up_due_at,
+        items=body.items,
+    )
+
+
+# Must stay above "/{finding_id}" so "follow-up-review" is not parsed as a UUID.
+@router.post(
+    "/follow-up-review/bulk-edit",
+    response_model=BulkFollowUpEditResponse,
+)
+def bulk_edit_finding_follow_up_endpoint(
+    body: BulkFollowUpEditRequest,
+    auth: Annotated[AuthContext, Depends(get_auth_context)],
+    db: Annotated[Session, Depends(get_db)],
+    directory: Annotated[ClerkDirectory, Depends(get_clerk_directory)],
+) -> BulkFollowUpEditResponse:
+    """Replace owner and due for selected active Findings."""
+    require_active_organization(auth)
+    assert auth.active_organization is not None
+    organization, _membership, actor = require_org_admin(
+        auth.active_organization.id, auth, db
+    )
+    enforce_rate_limit(
+        db,
+        organization_id=organization.id,
+        user_id=actor.user_id,
+        action=ACTION_ORGANIZATION_FINDING_FOLLOW_UP_BULK_EDIT,
+    )
+    return bulk_edit_finding_follow_up(
+        db,
+        organization=organization,
+        actor=actor,
+        directory=directory,
+        assigned_to_user_id=body.assigned_to_user_id,
         follow_up_due_at=body.follow_up_due_at,
         items=body.items,
     )

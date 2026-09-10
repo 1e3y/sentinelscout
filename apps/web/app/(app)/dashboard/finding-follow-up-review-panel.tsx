@@ -7,6 +7,10 @@ import {
   type BulkFollowUpDueIntent,
 } from "./finding-follow-up-bulk-due-modal";
 import {
+  FindingFollowUpBulkEditModal,
+  type BulkFollowUpEditIntent,
+} from "./finding-follow-up-bulk-edit-modal";
+import {
   FindingFollowUpDueModal,
   type DueDateIntent,
 } from "./finding-follow-up-due-modal";
@@ -15,6 +19,7 @@ import { parseApiError } from "@/lib/api-error";
 import {
   fetchFindingFollowUpReview,
   fetchTargets,
+  type BulkFollowUpEditResponse,
   type BulkFollowUpDueResponse,
   type FindingFollowUpDueState,
   type FindingFollowUpReviewItem,
@@ -23,6 +28,10 @@ import {
   type FindingReviewStatus,
   type TargetResponse,
 } from "@/lib/api";
+import {
+  sameBulkFollowUpEditIdentity,
+  sameFollowUpReviewSnapshot,
+} from "@/lib/bulk-follow-up-edit";
 import { organizationMemberLabel } from "@/lib/organization-member-label";
 import {
   shouldApplyReviewResult,
@@ -112,6 +121,10 @@ export function FindingFollowUpReviewPanel({
     useState<BulkFollowUpDueIntent | null>(null);
   const [bulkDueGeneration, setBulkDueGeneration] = useState(0);
   const [bulkDueEpoch, setBulkDueEpoch] = useState(0);
+  const [bulkEditIntent, setBulkEditIntent] =
+    useState<BulkFollowUpEditIntent | null>(null);
+  const [bulkEditSubmitGeneration, setBulkEditSubmitGeneration] = useState(0);
+  const [bulkEditModalGeneration, setBulkEditModalGeneration] = useState(0);
   const [reviewReplacing, setReviewReplacing] = useState(false);
 
   const generationRef = useRef(0);
@@ -122,6 +135,10 @@ export function FindingFollowUpReviewPanel({
   const targetGenerationRef = useRef(0);
   const recoveringCursorRef = useRef(false);
   const reviewReplacementRef = useRef(0);
+  const bulkEditIntentRef = useRef<BulkFollowUpEditIntent | null>(null);
+  const bulkEditSubmitGenerationRef = useRef(0);
+  const bulkEditModalGenerationRef = useRef(0);
+  const bulkEditReconciliationRef = useRef(0);
   const viewRef = useRef<FollowUpReviewRequestSnapshot>({
     organizationId,
     targetId: null,
@@ -140,6 +157,7 @@ export function FindingFollowUpReviewPanel({
     setSelectedIds([]);
     setBulkDueIntent(null);
     setBulkDueEpoch((value) => value + 1);
+    setBulkEditIntent(null);
   }
 
   const currentSnapshot = useCallback(
@@ -161,6 +179,10 @@ export function FindingFollowUpReviewPanel({
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      bulkEditIntentRef.current = null;
+      bulkEditSubmitGenerationRef.current += 1;
+      bulkEditModalGenerationRef.current += 1;
+      bulkEditReconciliationRef.current += 1;
     };
   }, []);
 
@@ -168,15 +190,55 @@ export function FindingFollowUpReviewPanel({
     viewRef.current = currentSnapshot(pageCursorRef.current);
   }, [currentSnapshot]);
 
+  const invalidateBulkEditIntent = useCallback(() => {
+    bulkEditIntentRef.current = null;
+    bulkEditSubmitGenerationRef.current += 1;
+    bulkEditModalGenerationRef.current += 1;
+    bulkEditReconciliationRef.current += 1;
+    setBulkEditIntent(null);
+    setBulkEditSubmitGeneration(bulkEditSubmitGenerationRef.current);
+    setBulkEditModalGeneration(bulkEditModalGenerationRef.current);
+  }, []);
+
   const invalidateBulkDue = useCallback(() => {
     setBulkDueEpoch((value) => value + 1);
     setSelectedIds([]);
     setBulkDueIntent(null);
-  }, []);
+    invalidateBulkEditIntent();
+  }, [invalidateBulkEditIntent]);
 
   const isBulkDueSubmitCurrent = useCallback(
     (generation: number) => generation === bulkDueEpoch,
     [bulkDueEpoch],
+  );
+
+  const isBulkEditIntentCurrent = useCallback(
+    (intent: BulkFollowUpEditIntent) => {
+      const currentIntent = bulkEditIntentRef.current;
+      if (!mountedRef.current || currentIntent == null || !organizationId) {
+        return false;
+      }
+      const liveSnapshot = currentSnapshot(pageCursorRef.current);
+      liveSnapshot.generation = generationRef.current;
+      const liveIdentity = {
+        organizationId,
+        reviewSnapshot: liveSnapshot,
+        submitGeneration: bulkEditSubmitGenerationRef.current,
+        modalGeneration: bulkEditModalGenerationRef.current,
+      };
+      return (
+        intent.submitGeneration === bulkEditSubmitGeneration &&
+        intent.modalGeneration === bulkEditModalGeneration &&
+        sameBulkFollowUpEditIdentity(intent, currentIntent) &&
+        sameBulkFollowUpEditIdentity(intent, liveIdentity)
+      );
+    },
+    [
+      bulkEditModalGeneration,
+      bulkEditSubmitGeneration,
+      currentSnapshot,
+      organizationId,
+    ],
   );
 
   const applyIfCurrent = useCallback(
@@ -475,9 +537,144 @@ export function FindingFollowUpReviewPanel({
     }
   }, [invalidateBulkDue, refreshFirstPageCurrent]);
 
+  const isBulkEditReconciliationCurrent = useCallback(
+    (
+      reconciliationGeneration: number,
+      reviewSnapshot: FollowUpReviewRequestSnapshot,
+    ) =>
+      mountedRef.current &&
+      bulkEditReconciliationRef.current === reconciliationGeneration &&
+      sameFollowUpReviewSnapshot(reviewSnapshot, currentSnapshot(null)),
+    [currentSnapshot],
+  );
+
+  const handleBulkEditWriteSucceeded = useCallback(
+    async (
+      intent: BulkFollowUpEditIntent,
+      response: BulkFollowUpEditResponse,
+    ) => {
+      if (!isBulkEditIntentCurrent(intent)) return;
+      setSuccess(
+        response.changed_count === 0
+          ? "Selected findings already use this follow-up owner and due date."
+          : `Follow-up updated for ${response.changed_count} selected ${
+              response.changed_count === 1 ? "finding" : "findings"
+            }.`,
+      );
+      setRefreshWarning(null);
+      setNotice(null);
+      setCurrentDueNotice(null);
+      setError(null);
+      invalidateBulkDue();
+      const refresh = refreshFirstPageCurrent();
+      const reconciliationGeneration = bulkEditReconciliationRef.current + 1;
+      bulkEditReconciliationRef.current = reconciliationGeneration;
+      const reviewSnapshot = currentSnapshot(null);
+      try {
+        await refresh;
+      } catch {
+        if (
+          !isBulkEditReconciliationCurrent(
+            reconciliationGeneration,
+            reviewSnapshot,
+          )
+        ) {
+          return;
+        }
+        setRefreshWarning(
+          "Follow-up was updated, but the follow-up review could not be refreshed.",
+        );
+      }
+    },
+    [
+      currentSnapshot,
+      invalidateBulkDue,
+      isBulkEditIntentCurrent,
+      isBulkEditReconciliationCurrent,
+      refreshFirstPageCurrent,
+    ],
+  );
+
+  const handleBulkEditConflict = useCallback(
+    async (intent: BulkFollowUpEditIntent) => {
+      if (!isBulkEditIntentCurrent(intent)) return;
+      setSuccess(null);
+      setRefreshWarning(null);
+      setCurrentDueNotice(null);
+      setError(null);
+      setNotice(
+        "Selected follow-up changed before this edit could be applied. Review the refreshed list and select findings again.",
+      );
+      invalidateBulkDue();
+      const refresh = refreshFirstPageCurrent();
+      const reconciliationGeneration = bulkEditReconciliationRef.current + 1;
+      bulkEditReconciliationRef.current = reconciliationGeneration;
+      const reviewSnapshot = currentSnapshot(null);
+      try {
+        await refresh;
+      } catch {
+        if (
+          !isBulkEditReconciliationCurrent(
+            reconciliationGeneration,
+            reviewSnapshot,
+          )
+        ) {
+          return;
+        }
+        setError("Finding follow-up review could not be loaded.");
+      }
+    },
+    [
+      currentSnapshot,
+      invalidateBulkDue,
+      isBulkEditIntentCurrent,
+      isBulkEditReconciliationCurrent,
+      refreshFirstPageCurrent,
+    ],
+  );
+
+  const handleBulkEditTransportUncertain = useCallback(
+    async (intent: BulkFollowUpEditIntent) => {
+      if (!isBulkEditIntentCurrent(intent)) return;
+      setSuccess(null);
+      setRefreshWarning(null);
+      setCurrentDueNotice(null);
+      setError(null);
+      setNotice(
+        "Bulk follow-up edit outcome could not be confirmed. Review the refreshed list before trying again.",
+      );
+      invalidateBulkDue();
+      const refresh = refreshFirstPageCurrent();
+      const reconciliationGeneration = bulkEditReconciliationRef.current + 1;
+      bulkEditReconciliationRef.current = reconciliationGeneration;
+      const reviewSnapshot = currentSnapshot(null);
+      try {
+        await refresh;
+      } catch {
+        if (
+          !isBulkEditReconciliationCurrent(
+            reconciliationGeneration,
+            reviewSnapshot,
+          )
+        ) {
+          return;
+        }
+        setRefreshWarning("Follow-up review could not be refreshed.");
+      }
+    },
+    [
+      currentSnapshot,
+      invalidateBulkDue,
+      isBulkEditIntentCurrent,
+      isBulkEditReconciliationCurrent,
+      refreshFirstPageCurrent,
+    ],
+  );
+
   const toggleBulkDueSelected = useCallback(
     (findingId: string) => {
       if (reviewReplacing) return;
+      invalidateBulkEditIntent();
       setSelectedIds((current) => {
         if (current.includes(findingId)) {
           return current.filter((id) => id !== findingId);
@@ -486,15 +683,16 @@ export function FindingFollowUpReviewPanel({
         return [...current, findingId];
       });
     },
-    [reviewReplacing],
+    [invalidateBulkEditIntent, reviewReplacing],
   );
 
   const selectVisibleForBulkDue = useCallback(() => {
     if (payload == null || reviewReplacing) return;
+    invalidateBulkEditIntent();
     setSelectedIds(
       payload.items.map((item) => item.finding_id).slice(0, MAX_BULK_SELECTION),
     );
-  }, [payload, reviewReplacing]);
+  }, [invalidateBulkEditIntent, payload, reviewReplacing]);
 
   const openBulkDue = useCallback(() => {
     if (payload == null || reviewReplacing || selectedIds.length === 0) return;
@@ -523,6 +721,62 @@ export function FindingFollowUpReviewPanel({
   }, [
     bulkDueEpoch,
     invalidateBulkDue,
+    payload,
+    reviewReplacing,
+    selectedIds,
+  ]);
+
+  const openBulkEdit = useCallback(() => {
+    if (
+      payload == null ||
+      reviewReplacing ||
+      selectedIds.length === 0 ||
+      !organizationId
+    ) {
+      return;
+    }
+    const selected = new Set(selectedIds);
+    const items = Object.freeze(
+      payload.items
+        .filter((item) => selected.has(item.finding_id))
+        .slice(0, MAX_BULK_SELECTION)
+        .map((item) =>
+          Object.freeze({
+            finding_id: item.finding_id,
+            expected_follow_up: Object.freeze({
+              assigned_to_user_id: item.assignee?.user_id ?? null,
+              follow_up_due_at: item.follow_up_due_at,
+            }),
+          }),
+        ),
+    );
+    if (items.length !== selectedIds.length || items.length === 0) {
+      invalidateBulkDue();
+      return;
+    }
+    const reviewSnapshot = Object.freeze({
+      ...currentSnapshot(pageCursorRef.current),
+      generation: generationRef.current,
+    });
+    const modalGeneration = bulkEditModalGenerationRef.current + 1;
+    bulkEditModalGenerationRef.current = modalGeneration;
+    setBulkEditModalGeneration(modalGeneration);
+    const submitGeneration = bulkEditSubmitGenerationRef.current;
+    setBulkEditSubmitGeneration(submitGeneration);
+    const intent = Object.freeze({
+      organizationId,
+      reviewSnapshot,
+      selectedCount: items.length,
+      items,
+      submitGeneration,
+      modalGeneration,
+    });
+    bulkEditIntentRef.current = intent;
+    setBulkEditIntent(intent);
+  }, [
+    currentSnapshot,
+    invalidateBulkDue,
+    organizationId,
     payload,
     reviewReplacing,
     selectedIds,
@@ -626,10 +880,26 @@ export function FindingFollowUpReviewPanel({
           <button
             type="button"
             disabled={reviewReplacing || selectedIds.length === 0}
+            className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm disabled:opacity-50"
+            onClick={invalidateBulkDue}
+          >
+            Clear selection
+          </button>
+          <button
+            type="button"
+            disabled={reviewReplacing || selectedIds.length === 0}
             className="rounded-md border border-zinc-900 bg-zinc-900 px-3 py-1.5 text-sm text-white disabled:opacity-50"
             onClick={openBulkDue}
           >
             Set due date for selected
+          </button>
+          <button
+            type="button"
+            disabled={reviewReplacing || selectedIds.length === 0}
+            className="rounded-md border border-zinc-900 bg-zinc-900 px-3 py-1.5 text-sm text-white disabled:opacity-50"
+            onClick={openBulkEdit}
+          >
+            Edit follow-up for selected
           </button>
         </div>
       ) : null}
@@ -749,6 +1019,21 @@ export function FindingFollowUpReviewPanel({
           onWriteSucceeded={handleBulkDueWriteSucceeded}
           onAuthoritativeConflict={handleBulkDueConflict}
           onTransportUncertain={handleBulkDueTransportUncertain}
+        />
+      ) : null}
+
+      {bulkEditIntent ? (
+        <FindingFollowUpBulkEditModal
+          key={bulkEditModalGeneration}
+          intent={bulkEditIntent}
+          isIntentCurrent={isBulkEditIntentCurrent}
+          onClose={(intent) => {
+            if (!isBulkEditIntentCurrent(intent)) return;
+            invalidateBulkEditIntent();
+          }}
+          onWriteSucceeded={handleBulkEditWriteSucceeded}
+          onAuthoritativeConflict={handleBulkEditConflict}
+          onTransportUncertain={handleBulkEditTransportUncertain}
         />
       ) : null}
     </section>
