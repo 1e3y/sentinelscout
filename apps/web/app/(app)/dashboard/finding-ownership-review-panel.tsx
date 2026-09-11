@@ -679,6 +679,7 @@ export function FindingOwnershipReviewPanel({
       ...currentSnapshot(pageCursorRef.current),
       generation: generationRef.current,
     });
+    openedPageRef.current = reviewSnapshot;
     const modalGeneration = bulkClearModalGenerationRef.current + 1;
     bulkClearModalGenerationRef.current = modalGeneration;
     setBulkClearModalGeneration(modalGeneration);

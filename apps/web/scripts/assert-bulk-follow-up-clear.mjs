@@ -67,6 +67,43 @@ assert(
   "M49 assign modal does not call the M53 helper",
 );
 
+const clearSnapshotIdx = ownership.indexOf(
+  "const reviewSnapshot = Object.freeze({",
+);
+const clearOriginIdx = ownership.indexOf(
+  "openedPageRef.current = reviewSnapshot",
+);
+const clearIntentIdx = ownership.indexOf("bulkClearIntentRef.current = intent");
+assert(
+  clearSnapshotIdx >= 0 &&
+    clearOriginIdx > clearSnapshotIdx &&
+    clearIntentIdx > clearOriginIdx,
+  "M53 open captures the semantic snapshot then seeds it as the refresh origin before exposing intent",
+);
+assert(
+  ownership.includes(
+    "openedPageRef.current = currentSnapshot(pageCursorRef.current)",
+  ) &&
+    ownership.includes("submitGeneration: bulkEpoch") &&
+    count(ownership, "openedPageRef.current = currentSnapshot(") === 2 &&
+    count(ownership, "openedPageRef.current = reviewSnapshot") === 1,
+  "M49 and single-finding opens keep their own refresh origins; M53 overwrites with its frozen snapshot",
+);
+const clearSuccessFn = ownership.slice(
+  ownership.indexOf("const handleBulkClearWriteSucceeded"),
+  ownership.indexOf("const handleBulkClearConflict"),
+);
+assert(
+  clearSuccessFn.includes("const refresh = refreshAfterMutation();") &&
+    !clearSuccessFn.includes("openedPageRef.current =") &&
+    ownership.includes(
+      "const cursor = ownershipRefreshCursor(opened, live);",
+    ) &&
+    ownership.includes("const opened = openedPageRef.current;") &&
+    ownership.includes("const live = viewRef.current;"),
+  "same-page M53 success refresh uses the open-time origin through ownershipRefreshCursor",
+);
+
 assert(
   count(followUp, "useState<string[]>([])") === 1 &&
     followUp.includes("selectedIds") &&
