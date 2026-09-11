@@ -22,6 +22,10 @@ from app.schemas.finding_follow_up import (
     FindingFollowUpResponse,
     UpdateFindingFollowUpRequest,
 )
+from app.schemas.finding_follow_up_bulk_clear import (
+    BulkFollowUpClearRequest,
+    BulkFollowUpClearResponse,
+)
 from app.schemas.finding_follow_up_bulk_due import (
     BulkFollowUpDueRequest,
     BulkFollowUpDueResponse,
@@ -72,6 +76,7 @@ from app.services.findings import (
     update_finding_follow_up,
 )
 from app.services.findings.follow_up import resolve_follow_up_response
+from app.services.findings.follow_up_bulk_clear import bulk_clear_finding_follow_up
 from app.services.findings.follow_up_bulk_due import (
     bulk_update_finding_follow_up_due,
 )
@@ -113,6 +118,7 @@ from app.services.findings_inbox import (
 from app.services.provenance import build_finding_provenance
 from app.services.rate_limit import (
     ACTION_FINDING_FOLLOW_UP,
+    ACTION_ORGANIZATION_FINDING_FOLLOW_UP_BULK_CLEAR,
     ACTION_ORGANIZATION_FINDING_FOLLOW_UP_BULK_DUE,
     ACTION_ORGANIZATION_FINDING_FOLLOW_UP_BULK_EDIT,
     ACTION_ORGANIZATION_FINDING_FOLLOW_UP_READ,
@@ -420,6 +426,41 @@ def bulk_update_finding_follow_up_due_endpoint(
         actor=actor,
         directory=directory,
         follow_up_due_at=body.follow_up_due_at,
+        items=body.items,
+    )
+
+
+# Must stay above "/{finding_id}" so "follow-up-review" is not parsed as a UUID.
+@router.post(
+    "/follow-up-review/bulk-clear",
+    response_model=BulkFollowUpClearResponse,
+)
+def bulk_clear_finding_follow_up_endpoint(
+    body: BulkFollowUpClearRequest,
+    auth: Annotated[AuthContext, Depends(get_auth_context)],
+    db: Annotated[Session, Depends(get_db)],
+) -> BulkFollowUpClearResponse:
+    """Clear selected follow-up owner and/or due date for selected active Findings.
+
+    Provider-free. Does not assign or verify membership.
+    """
+    require_active_organization(auth)
+    assert auth.active_organization is not None
+    organization, _membership, actor = require_org_admin(
+        auth.active_organization.id, auth, db
+    )
+    enforce_rate_limit(
+        db,
+        organization_id=organization.id,
+        user_id=actor.user_id,
+        action=ACTION_ORGANIZATION_FINDING_FOLLOW_UP_BULK_CLEAR,
+    )
+    return bulk_clear_finding_follow_up(
+        db,
+        organization=organization,
+        actor=actor,
+        clear_owner=body.clear_owner,
+        clear_due=body.clear_due,
         items=body.items,
     )
 

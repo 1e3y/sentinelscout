@@ -10,6 +10,7 @@ import {
   FindingFollowUpBulkEditModal,
   type BulkFollowUpEditIntent,
 } from "./finding-follow-up-bulk-edit-modal";
+import { FindingFollowUpBulkClearModal } from "./finding-follow-up-bulk-clear-modal";
 import {
   FindingFollowUpDueModal,
   type DueDateIntent,
@@ -19,6 +20,7 @@ import { parseApiError } from "@/lib/api-error";
 import {
   fetchFindingFollowUpReview,
   fetchTargets,
+  type BulkFollowUpClearResponse,
   type BulkFollowUpEditResponse,
   type BulkFollowUpDueResponse,
   type FindingFollowUpDueState,
@@ -28,6 +30,11 @@ import {
   type FindingReviewStatus,
   type TargetResponse,
 } from "@/lib/api";
+import {
+  sameBulkFollowUpClearIdentity,
+  type BulkFollowUpClearIntent,
+  type BulkFollowUpClearMode,
+} from "@/lib/bulk-follow-up-clear";
 import {
   sameBulkFollowUpEditIdentity,
   sameFollowUpReviewSnapshot,
@@ -125,6 +132,10 @@ export function FindingFollowUpReviewPanel({
     useState<BulkFollowUpEditIntent | null>(null);
   const [bulkEditSubmitGeneration, setBulkEditSubmitGeneration] = useState(0);
   const [bulkEditModalGeneration, setBulkEditModalGeneration] = useState(0);
+  const [bulkClearIntent, setBulkClearIntent] =
+    useState<BulkFollowUpClearIntent | null>(null);
+  const [bulkClearSubmitGeneration, setBulkClearSubmitGeneration] = useState(0);
+  const [bulkClearModalGeneration, setBulkClearModalGeneration] = useState(0);
   const [reviewReplacing, setReviewReplacing] = useState(false);
 
   const generationRef = useRef(0);
@@ -139,6 +150,10 @@ export function FindingFollowUpReviewPanel({
   const bulkEditSubmitGenerationRef = useRef(0);
   const bulkEditModalGenerationRef = useRef(0);
   const bulkEditReconciliationRef = useRef(0);
+  const bulkClearIntentRef = useRef<BulkFollowUpClearIntent | null>(null);
+  const bulkClearSubmitGenerationRef = useRef(0);
+  const bulkClearModalGenerationRef = useRef(0);
+  const bulkClearReconciliationRef = useRef(0);
   const viewRef = useRef<FollowUpReviewRequestSnapshot>({
     organizationId,
     targetId: null,
@@ -158,6 +173,9 @@ export function FindingFollowUpReviewPanel({
     setBulkDueIntent(null);
     setBulkDueEpoch((value) => value + 1);
     setBulkEditIntent(null);
+    setBulkClearIntent(null);
+    setBulkClearSubmitGeneration((value) => value + 1);
+    setBulkClearModalGeneration((value) => value + 1);
   }
 
   const currentSnapshot = useCallback(
@@ -183,12 +201,33 @@ export function FindingFollowUpReviewPanel({
       bulkEditSubmitGenerationRef.current += 1;
       bulkEditModalGenerationRef.current += 1;
       bulkEditReconciliationRef.current += 1;
+      bulkClearIntentRef.current = null;
+      bulkClearSubmitGenerationRef.current += 1;
+      bulkClearModalGenerationRef.current += 1;
+      bulkClearReconciliationRef.current += 1;
     };
   }, []);
 
   useEffect(() => {
     viewRef.current = currentSnapshot(pageCursorRef.current);
   }, [currentSnapshot]);
+
+  const invalidateBulkClearIntent = useCallback(() => {
+    bulkClearIntentRef.current = null;
+    bulkClearSubmitGenerationRef.current += 1;
+    bulkClearModalGenerationRef.current += 1;
+    bulkClearReconciliationRef.current += 1;
+    setBulkClearIntent(null);
+    setBulkClearSubmitGeneration(bulkClearSubmitGenerationRef.current);
+    setBulkClearModalGeneration(bulkClearModalGenerationRef.current);
+  }, []);
+
+  useEffect(() => {
+    bulkClearIntentRef.current = null;
+    bulkClearSubmitGenerationRef.current += 1;
+    bulkClearModalGenerationRef.current += 1;
+    bulkClearReconciliationRef.current += 1;
+  }, [organizationId]);
 
   const invalidateBulkEditIntent = useCallback(() => {
     bulkEditIntentRef.current = null;
@@ -205,7 +244,8 @@ export function FindingFollowUpReviewPanel({
     setSelectedIds([]);
     setBulkDueIntent(null);
     invalidateBulkEditIntent();
-  }, [invalidateBulkEditIntent]);
+    invalidateBulkClearIntent();
+  }, [invalidateBulkClearIntent, invalidateBulkEditIntent]);
 
   const isBulkDueSubmitCurrent = useCallback(
     (generation: number) => generation === bulkDueEpoch,
@@ -671,9 +711,183 @@ export function FindingFollowUpReviewPanel({
     ],
   );
 
+  const isBulkClearIntentCurrent = useCallback(
+    (intent: BulkFollowUpClearIntent) => {
+      const currentIntent = bulkClearIntentRef.current;
+      if (!mountedRef.current || currentIntent == null || !organizationId) {
+        return false;
+      }
+      const liveSnapshot = currentSnapshot(pageCursorRef.current);
+      liveSnapshot.generation = generationRef.current;
+      const liveIdentity = {
+        surface: "follow-up-review" as const,
+        organizationId,
+        reviewSnapshot: liveSnapshot,
+        submitGeneration: bulkClearSubmitGenerationRef.current,
+        modalGeneration: bulkClearModalGenerationRef.current,
+      };
+      return (
+        sameBulkFollowUpClearIdentity(intent, currentIntent) &&
+        sameBulkFollowUpClearIdentity(intent, liveIdentity) &&
+        intent.submitGeneration === bulkClearSubmitGeneration &&
+        intent.modalGeneration === bulkClearModalGeneration
+      );
+    },
+    [
+      bulkClearModalGeneration,
+      bulkClearSubmitGeneration,
+      currentSnapshot,
+      organizationId,
+    ],
+  );
+
+  const isBulkClearReconciliationCurrent = useCallback(
+    (
+      reconciliationGeneration: number,
+      reviewSnapshot: FollowUpReviewRequestSnapshot,
+    ) =>
+      mountedRef.current &&
+      bulkClearReconciliationRef.current === reconciliationGeneration &&
+      sameFollowUpReviewSnapshot(reviewSnapshot, currentSnapshot(null)),
+    [currentSnapshot],
+  );
+
+  const handleBulkClearWriteSucceeded = useCallback(
+    async (
+      intent: BulkFollowUpClearIntent,
+      response: BulkFollowUpClearResponse,
+    ) => {
+      if (!isBulkClearIntentCurrent(intent)) return;
+      const noun =
+        intent.clear_owner && intent.clear_due
+          ? "Follow-up"
+          : intent.clear_due
+            ? "Due dates"
+            : "Owners";
+      setSuccess(
+        response.changed_count === 0
+          ? "Selected findings already match this clear."
+          : `${noun} cleared for ${response.changed_count} selected ${
+              response.changed_count === 1 ? "finding" : "findings"
+            }.`,
+      );
+      setRefreshWarning(null);
+      setNotice(null);
+      setCurrentDueNotice(null);
+      setError(null);
+      invalidateBulkClearIntent();
+      setSelectedIds([]);
+      const refresh = refreshFirstPageCurrent();
+      const reconciliationGeneration = bulkClearReconciliationRef.current + 1;
+      bulkClearReconciliationRef.current = reconciliationGeneration;
+      const reviewSnapshot = currentSnapshot(null);
+      try {
+        await refresh;
+      } catch {
+        if (
+          !isBulkClearReconciliationCurrent(
+            reconciliationGeneration,
+            reviewSnapshot,
+          )
+        ) {
+          return;
+        }
+        setRefreshWarning(
+          "Follow-up was cleared, but the follow-up review could not be refreshed.",
+        );
+      }
+    },
+    [
+      currentSnapshot,
+      invalidateBulkClearIntent,
+      isBulkClearIntentCurrent,
+      isBulkClearReconciliationCurrent,
+      refreshFirstPageCurrent,
+    ],
+  );
+
+  const handleBulkClearConflict = useCallback(
+    async (intent: BulkFollowUpClearIntent) => {
+      if (!isBulkClearIntentCurrent(intent)) return;
+      setSuccess(null);
+      setRefreshWarning(null);
+      setCurrentDueNotice(null);
+      setError(null);
+      setNotice(
+        "Selected follow-up changed before this clear could be applied. Review the refreshed list and select findings again.",
+      );
+      invalidateBulkClearIntent();
+      setSelectedIds([]);
+      const refresh = refreshFirstPageCurrent();
+      const reconciliationGeneration = bulkClearReconciliationRef.current + 1;
+      bulkClearReconciliationRef.current = reconciliationGeneration;
+      const reviewSnapshot = currentSnapshot(null);
+      try {
+        await refresh;
+      } catch {
+        if (
+          !isBulkClearReconciliationCurrent(
+            reconciliationGeneration,
+            reviewSnapshot,
+          )
+        ) {
+          return;
+        }
+        setError("Finding follow-up review could not be loaded.");
+      }
+    },
+    [
+      currentSnapshot,
+      invalidateBulkClearIntent,
+      isBulkClearIntentCurrent,
+      isBulkClearReconciliationCurrent,
+      refreshFirstPageCurrent,
+    ],
+  );
+
+  const handleBulkClearTransportUncertain = useCallback(
+    async (intent: BulkFollowUpClearIntent) => {
+      if (!isBulkClearIntentCurrent(intent)) return;
+      setSuccess(null);
+      setRefreshWarning(null);
+      setCurrentDueNotice(null);
+      setError(null);
+      setNotice(
+        "Bulk follow-up clear outcome could not be confirmed. Review the refreshed list before trying again.",
+      );
+      invalidateBulkClearIntent();
+      setSelectedIds([]);
+      const refresh = refreshFirstPageCurrent();
+      const reconciliationGeneration = bulkClearReconciliationRef.current + 1;
+      bulkClearReconciliationRef.current = reconciliationGeneration;
+      const reviewSnapshot = currentSnapshot(null);
+      try {
+        await refresh;
+      } catch {
+        if (
+          !isBulkClearReconciliationCurrent(
+            reconciliationGeneration,
+            reviewSnapshot,
+          )
+        ) {
+          return;
+        }
+        setRefreshWarning("Follow-up review could not be refreshed.");
+      }
+    },
+    [
+      currentSnapshot,
+      invalidateBulkClearIntent,
+      isBulkClearIntentCurrent,
+      isBulkClearReconciliationCurrent,
+      refreshFirstPageCurrent,
+    ],
+  );
+
   const toggleBulkDueSelected = useCallback(
     (findingId: string) => {
       if (reviewReplacing) return;
+      invalidateBulkClearIntent();
       invalidateBulkEditIntent();
       setSelectedIds((current) => {
         if (current.includes(findingId)) {
@@ -683,16 +897,17 @@ export function FindingFollowUpReviewPanel({
         return [...current, findingId];
       });
     },
-    [invalidateBulkEditIntent, reviewReplacing],
+    [invalidateBulkClearIntent, invalidateBulkEditIntent, reviewReplacing],
   );
 
   const selectVisibleForBulkDue = useCallback(() => {
     if (payload == null || reviewReplacing) return;
+    invalidateBulkClearIntent();
     invalidateBulkEditIntent();
     setSelectedIds(
       payload.items.map((item) => item.finding_id).slice(0, MAX_BULK_SELECTION),
     );
-  }, [invalidateBulkEditIntent, payload, reviewReplacing]);
+  }, [invalidateBulkClearIntent, invalidateBulkEditIntent, payload, reviewReplacing]);
 
   const openBulkDue = useCallback(() => {
     if (payload == null || reviewReplacing || selectedIds.length === 0) return;
@@ -781,6 +996,68 @@ export function FindingFollowUpReviewPanel({
     reviewReplacing,
     selectedIds,
   ]);
+
+  const openBulkClear = useCallback(
+    (mode: BulkFollowUpClearMode) => {
+      if (
+        payload == null ||
+        reviewReplacing ||
+        selectedIds.length === 0 ||
+        !organizationId
+      ) {
+        return;
+      }
+      const selected = new Set(selectedIds);
+      const items = Object.freeze(
+        payload.items
+          .filter((item) => selected.has(item.finding_id))
+          .slice(0, MAX_BULK_SELECTION)
+          .map((item) =>
+            Object.freeze({
+              finding_id: item.finding_id,
+              expected_follow_up: Object.freeze({
+                assigned_to_user_id: item.assignee?.user_id ?? null,
+                follow_up_due_at: item.follow_up_due_at,
+              }),
+            }),
+          ),
+      );
+      if (items.length !== selectedIds.length || items.length === 0) {
+        invalidateBulkClearIntent();
+        return;
+      }
+      const reviewSnapshot = Object.freeze({
+        ...currentSnapshot(pageCursorRef.current),
+        generation: generationRef.current,
+      });
+      const modalGeneration = bulkClearModalGenerationRef.current + 1;
+      bulkClearModalGenerationRef.current = modalGeneration;
+      setBulkClearModalGeneration(modalGeneration);
+      const submitGeneration = bulkClearSubmitGenerationRef.current;
+      setBulkClearSubmitGeneration(submitGeneration);
+      const intent = Object.freeze({
+        surface: "follow-up-review" as const,
+        organizationId,
+        reviewSnapshot,
+        selectedCount: items.length,
+        items,
+        clear_owner: mode !== "due",
+        clear_due: mode !== "owner",
+        submitGeneration,
+        modalGeneration,
+      });
+      bulkClearIntentRef.current = intent;
+      setBulkClearIntent(intent);
+    },
+    [
+      currentSnapshot,
+      invalidateBulkClearIntent,
+      organizationId,
+      payload,
+      reviewReplacing,
+      selectedIds,
+    ],
+  );
 
   if (!enabled) return null;
 
@@ -900,6 +1177,22 @@ export function FindingFollowUpReviewPanel({
             onClick={openBulkEdit}
           >
             Edit follow-up for selected
+          </button>
+          <button
+            type="button"
+            disabled={reviewReplacing || selectedIds.length === 0}
+            className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm disabled:opacity-50"
+            onClick={() => openBulkClear("due")}
+          >
+            Clear due dates for selected
+          </button>
+          <button
+            type="button"
+            disabled={reviewReplacing || selectedIds.length === 0}
+            className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm disabled:opacity-50"
+            onClick={() => openBulkClear("both")}
+          >
+            Clear follow-up for selected
           </button>
         </div>
       ) : null}
@@ -1034,6 +1327,21 @@ export function FindingFollowUpReviewPanel({
           onWriteSucceeded={handleBulkEditWriteSucceeded}
           onAuthoritativeConflict={handleBulkEditConflict}
           onTransportUncertain={handleBulkEditTransportUncertain}
+        />
+      ) : null}
+
+      {bulkClearIntent ? (
+        <FindingFollowUpBulkClearModal
+          key={bulkClearModalGeneration}
+          intent={bulkClearIntent}
+          isIntentCurrent={isBulkClearIntentCurrent}
+          onClose={(intent) => {
+            if (!isBulkClearIntentCurrent(intent)) return;
+            invalidateBulkClearIntent();
+          }}
+          onWriteSucceeded={handleBulkClearWriteSucceeded}
+          onAuthoritativeConflict={handleBulkClearConflict}
+          onTransportUncertain={handleBulkClearTransportUncertain}
         />
       ) : null}
     </section>

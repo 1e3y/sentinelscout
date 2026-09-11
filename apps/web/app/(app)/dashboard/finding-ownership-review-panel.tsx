@@ -7,10 +7,12 @@ import {
   FindingOwnershipBulkAssignModal,
   type BulkOwnershipAssignIntent,
 } from "./finding-ownership-bulk-assign-modal";
+import { FindingFollowUpBulkClearModal } from "./finding-follow-up-bulk-clear-modal";
 import { FindingReviewFilters } from "./finding-review-filters";
 import {
   fetchFindingOwnershipReview,
   fetchTargets,
+  type BulkFollowUpClearResponse,
   type FindingOwnershipAssignmentState,
   type FindingOwnershipReviewItem,
   type FindingOwnershipReviewResponse,
@@ -18,6 +20,10 @@ import {
   type FindingReviewStatus,
   type TargetResponse,
 } from "@/lib/api";
+import {
+  sameBulkFollowUpClearIdentity,
+  type BulkFollowUpClearIntent,
+} from "@/lib/bulk-follow-up-clear";
 import { organizationMemberLabel } from "@/lib/organization-member-label";
 import {
   ownershipRefreshCursor,
@@ -89,6 +95,10 @@ export function FindingOwnershipReviewPanel({
   );
   const [bulkGeneration, setBulkGeneration] = useState(0);
   const [bulkEpoch, setBulkEpoch] = useState(0);
+  const [bulkClearIntent, setBulkClearIntent] =
+    useState<BulkFollowUpClearIntent | null>(null);
+  const [bulkClearSubmitGeneration, setBulkClearSubmitGeneration] = useState(0);
+  const [bulkClearModalGeneration, setBulkClearModalGeneration] = useState(0);
   const [targetId, setTargetId] = useState("");
   const [severity, setSeverity] = useState("");
   const [status, setStatus] = useState("");
@@ -104,6 +114,10 @@ export function FindingOwnershipReviewPanel({
   const mountedRef = useRef(true);
   const targetGenerationRef = useRef(0);
   const openedPageRef = useRef<OwnershipReviewRequestSnapshot | null>(null);
+  const bulkClearIntentRef = useRef<BulkFollowUpClearIntent | null>(null);
+  const bulkClearSubmitGenerationRef = useRef(0);
+  const bulkClearModalGenerationRef = useRef(0);
+  const bulkClearReconciliationRef = useRef(0);
   const viewRef = useRef<OwnershipReviewRequestSnapshot>({
     organizationId,
     targetId: null,
@@ -121,6 +135,9 @@ export function FindingOwnershipReviewPanel({
     setSelectedIds([]);
     setBulkIntent(null);
     setBulkEpoch((value) => value + 1);
+    setBulkClearIntent(null);
+    setBulkClearSubmitGeneration((value) => value + 1);
+    setBulkClearModalGeneration((value) => value + 1);
   }
 
   const currentSnapshot = useCallback(
@@ -139,12 +156,33 @@ export function FindingOwnershipReviewPanel({
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      bulkClearIntentRef.current = null;
+      bulkClearSubmitGenerationRef.current += 1;
+      bulkClearModalGenerationRef.current += 1;
+      bulkClearReconciliationRef.current += 1;
     };
   }, []);
 
   useEffect(() => {
     viewRef.current = currentSnapshot(pageCursorRef.current);
   }, [currentSnapshot]);
+
+  const invalidateBulkClearIntent = useCallback(() => {
+    bulkClearIntentRef.current = null;
+    bulkClearSubmitGenerationRef.current += 1;
+    bulkClearModalGenerationRef.current += 1;
+    bulkClearReconciliationRef.current += 1;
+    setBulkClearIntent(null);
+    setBulkClearSubmitGeneration(bulkClearSubmitGenerationRef.current);
+    setBulkClearModalGeneration(bulkClearModalGenerationRef.current);
+  }, []);
+
+  useEffect(() => {
+    bulkClearIntentRef.current = null;
+    bulkClearSubmitGenerationRef.current += 1;
+    bulkClearModalGenerationRef.current += 1;
+    bulkClearReconciliationRef.current += 1;
+  }, [organizationId]);
 
   const applyIfCurrent = useCallback(
     (request: OwnershipReviewRequestSnapshot, next: FindingOwnershipReviewResponse) => {
@@ -166,16 +204,18 @@ export function FindingOwnershipReviewPanel({
       setSelectedIds([]);
       setBulkIntent(null);
       setBulkEpoch((value) => value + 1);
+      invalidateBulkClearIntent();
       return true;
     },
-    [currentSnapshot],
+    [currentSnapshot, invalidateBulkClearIntent],
   );
 
   const invalidateBulk = useCallback(() => {
     setBulkEpoch((value) => value + 1);
     setSelectedIds([]);
     setBulkIntent(null);
-  }, []);
+    invalidateBulkClearIntent();
+  }, [invalidateBulkClearIntent]);
 
   const isBulkSubmitCurrent = useCallback(
     (generation: number) => generation === bulkEpoch,
@@ -402,7 +442,171 @@ export function FindingOwnershipReviewPanel({
     }
   }, [invalidateBulk, refreshAfterMutation]);
 
+  const isBulkClearIntentCurrent = useCallback(
+    (intent: BulkFollowUpClearIntent) => {
+      const currentIntent = bulkClearIntentRef.current;
+      if (!mountedRef.current || currentIntent == null || !organizationId) {
+        return false;
+      }
+      const liveSnapshot = currentSnapshot(pageCursorRef.current);
+      liveSnapshot.generation = generationRef.current;
+      const liveIdentity = {
+        surface: "ownership-review" as const,
+        organizationId,
+        reviewSnapshot: liveSnapshot,
+        submitGeneration: bulkClearSubmitGenerationRef.current,
+        modalGeneration: bulkClearModalGenerationRef.current,
+      };
+      return (
+        sameBulkFollowUpClearIdentity(intent, currentIntent) &&
+        sameBulkFollowUpClearIdentity(intent, liveIdentity) &&
+        intent.submitGeneration === bulkClearSubmitGeneration &&
+        intent.modalGeneration === bulkClearModalGeneration
+      );
+    },
+    [
+      bulkClearModalGeneration,
+      bulkClearSubmitGeneration,
+      currentSnapshot,
+      organizationId,
+    ],
+  );
+
+  const isBulkClearReconciliationCurrent = useCallback(
+    (reconciliationGeneration: number, reviewSnapshot: OwnershipReviewRequestSnapshot) =>
+      mountedRef.current &&
+      bulkClearReconciliationRef.current === reconciliationGeneration &&
+      sameReviewCollection(reviewSnapshot, currentSnapshot(pageCursorRef.current)) &&
+      reviewSnapshot.cursor === currentSnapshot(pageCursorRef.current).cursor &&
+      reviewSnapshot.generation === generationRef.current,
+    [currentSnapshot],
+  );
+
+  const handleBulkClearWriteSucceeded = useCallback(
+    async (
+      intent: BulkFollowUpClearIntent,
+      response: BulkFollowUpClearResponse,
+    ) => {
+      if (!isBulkClearIntentCurrent(intent)) return;
+      setSuccess(
+        response.changed_count === 0
+          ? "Selected findings were already unassigned."
+          : `Owner removed for ${response.changed_count} selected ${
+              response.changed_count === 1 ? "finding" : "findings"
+            }.`,
+      );
+      setRefreshWarning(null);
+      setNotice(null);
+      setError(null);
+      invalidateBulkClearIntent();
+      setSelectedIds([]);
+      const refresh = refreshAfterMutation();
+      const reconciliationGeneration = bulkClearReconciliationRef.current + 1;
+      bulkClearReconciliationRef.current = reconciliationGeneration;
+      const reviewSnapshot = currentSnapshot(pageCursorRef.current);
+      try {
+        await refresh;
+      } catch {
+        if (
+          !isBulkClearReconciliationCurrent(
+            reconciliationGeneration,
+            reviewSnapshot,
+          )
+        ) {
+          return;
+        }
+        setRefreshWarning(
+          "Owners were removed, but ownership review could not be refreshed.",
+        );
+      }
+    },
+    [
+      currentSnapshot,
+      invalidateBulkClearIntent,
+      isBulkClearIntentCurrent,
+      isBulkClearReconciliationCurrent,
+      refreshAfterMutation,
+    ],
+  );
+
+  const handleBulkClearConflict = useCallback(
+    async (intent: BulkFollowUpClearIntent) => {
+      if (!isBulkClearIntentCurrent(intent)) return;
+      setSuccess(null);
+      setRefreshWarning(null);
+      setError(null);
+      setNotice(
+        "Selected findings changed before this clear could be applied. Review the refreshed list and select findings again.",
+      );
+      invalidateBulkClearIntent();
+      setSelectedIds([]);
+      const refresh = refreshAfterMutation();
+      const reconciliationGeneration = bulkClearReconciliationRef.current + 1;
+      bulkClearReconciliationRef.current = reconciliationGeneration;
+      const reviewSnapshot = currentSnapshot(pageCursorRef.current);
+      try {
+        await refresh;
+      } catch {
+        if (
+          !isBulkClearReconciliationCurrent(
+            reconciliationGeneration,
+            reviewSnapshot,
+          )
+        ) {
+          return;
+        }
+        setError("Finding ownership could not be verified.");
+      }
+    },
+    [
+      currentSnapshot,
+      invalidateBulkClearIntent,
+      isBulkClearIntentCurrent,
+      isBulkClearReconciliationCurrent,
+      refreshAfterMutation,
+    ],
+  );
+
+  const handleBulkClearTransportUncertain = useCallback(
+    async (intent: BulkFollowUpClearIntent) => {
+      if (!isBulkClearIntentCurrent(intent)) return;
+      setSuccess(null);
+      setRefreshWarning(null);
+      setError(null);
+      setNotice(
+        "Bulk unassign outcome could not be confirmed. Review the refreshed list before trying again.",
+      );
+      invalidateBulkClearIntent();
+      setSelectedIds([]);
+      const refresh = refreshAfterMutation();
+      const reconciliationGeneration = bulkClearReconciliationRef.current + 1;
+      bulkClearReconciliationRef.current = reconciliationGeneration;
+      const reviewSnapshot = currentSnapshot(pageCursorRef.current);
+      try {
+        await refresh;
+      } catch {
+        if (
+          !isBulkClearReconciliationCurrent(
+            reconciliationGeneration,
+            reviewSnapshot,
+          )
+        ) {
+          return;
+        }
+        setRefreshWarning("Ownership review could not be refreshed.");
+      }
+    },
+    [
+      currentSnapshot,
+      invalidateBulkClearIntent,
+      isBulkClearIntentCurrent,
+      isBulkClearReconciliationCurrent,
+      refreshAfterMutation,
+    ],
+  );
+
   const toggleSelected = useCallback((findingId: string) => {
+    invalidateBulkClearIntent();
     setSelectedIds((current) => {
       if (current.includes(findingId)) {
         return current.filter((id) => id !== findingId);
@@ -410,14 +614,20 @@ export function FindingOwnershipReviewPanel({
       if (current.length >= MAX_BULK_SELECTION) return current;
       return [...current, findingId];
     });
-  }, []);
+  }, [invalidateBulkClearIntent]);
 
   const selectVisible = useCallback(() => {
     if (payload == null) return;
+    invalidateBulkClearIntent();
     setSelectedIds(
       payload.items.map((item) => item.finding_id).slice(0, MAX_BULK_SELECTION),
     );
-  }, [payload]);
+  }, [invalidateBulkClearIntent, payload]);
+
+  const clearSelection = useCallback(() => {
+    invalidateBulkClearIntent();
+    setSelectedIds([]);
+  }, [invalidateBulkClearIntent]);
 
   const openBulkAssign = useCallback(() => {
     if (payload == null || selectedIds.length === 0) return;
@@ -441,6 +651,59 @@ export function FindingOwnershipReviewPanel({
       submitGeneration: bulkEpoch,
     });
   }, [bulkEpoch, currentSnapshot, payload, selectedIds]);
+
+  const openBulkClear = useCallback(() => {
+    if (payload == null || selectedIds.length === 0 || !organizationId) {
+      return;
+    }
+    const selected = new Set(selectedIds);
+    const items = Object.freeze(
+      payload.items
+        .filter((item) => selected.has(item.finding_id))
+        .slice(0, MAX_BULK_SELECTION)
+        .map((item) =>
+          Object.freeze({
+            finding_id: item.finding_id,
+            expected_follow_up: Object.freeze({
+              assigned_to_user_id: item.assignee?.user_id ?? null,
+              follow_up_due_at: item.follow_up_due_at,
+            }),
+          }),
+        ),
+    );
+    if (items.length !== selectedIds.length || items.length === 0) {
+      invalidateBulkClearIntent();
+      return;
+    }
+    const reviewSnapshot = Object.freeze({
+      ...currentSnapshot(pageCursorRef.current),
+      generation: generationRef.current,
+    });
+    const modalGeneration = bulkClearModalGenerationRef.current + 1;
+    bulkClearModalGenerationRef.current = modalGeneration;
+    setBulkClearModalGeneration(modalGeneration);
+    const submitGeneration = bulkClearSubmitGenerationRef.current;
+    setBulkClearSubmitGeneration(submitGeneration);
+    const intent = Object.freeze({
+      surface: "ownership-review" as const,
+      organizationId,
+      reviewSnapshot,
+      selectedCount: items.length,
+      items,
+      clear_owner: true,
+      clear_due: false,
+      submitGeneration,
+      modalGeneration,
+    });
+    bulkClearIntentRef.current = intent;
+    setBulkClearIntent(intent);
+  }, [
+    currentSnapshot,
+    invalidateBulkClearIntent,
+    organizationId,
+    payload,
+    selectedIds,
+  ]);
 
   if (!enabled) return null;
 
@@ -517,9 +780,25 @@ export function FindingOwnershipReviewPanel({
             type="button"
             disabled={pending || selectedIds.length === 0}
             className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm disabled:opacity-50"
+            onClick={clearSelection}
+          >
+            Clear selection
+          </button>
+          <button
+            type="button"
+            disabled={pending || selectedIds.length === 0}
+            className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm disabled:opacity-50"
             onClick={openBulkAssign}
           >
             Assign selected
+          </button>
+          <button
+            type="button"
+            disabled={pending || selectedIds.length === 0}
+            className="rounded-md border border-zinc-900 bg-zinc-900 px-3 py-1.5 text-sm text-white disabled:opacity-50"
+            onClick={openBulkClear}
+          >
+            Unassign selected
           </button>
         </div>
       ) : null}
@@ -644,6 +923,21 @@ export function FindingOwnershipReviewPanel({
           onClose={() => setBulkIntent(null)}
           onWriteSucceeded={handleBulkWriteSucceeded}
           onTransportUncertain={handleBulkTransportUncertain}
+        />
+      ) : null}
+
+      {bulkClearIntent ? (
+        <FindingFollowUpBulkClearModal
+          key={bulkClearModalGeneration}
+          intent={bulkClearIntent}
+          isIntentCurrent={isBulkClearIntentCurrent}
+          onClose={(intent) => {
+            if (!isBulkClearIntentCurrent(intent)) return;
+            invalidateBulkClearIntent();
+          }}
+          onWriteSucceeded={handleBulkClearWriteSucceeded}
+          onAuthoritativeConflict={handleBulkClearConflict}
+          onTransportUncertain={handleBulkClearTransportUncertain}
         />
       ) : null}
     </section>

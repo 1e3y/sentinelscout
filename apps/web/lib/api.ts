@@ -1652,6 +1652,47 @@ export function bulkEditFindingFollowUp(
   );
 }
 
+export type BulkFollowUpClearItem = {
+  finding_id: string;
+  expected_follow_up: ExpectedFollowUpState;
+};
+
+export type BulkFollowUpClearRequest = {
+  clear_owner: boolean;
+  clear_due: boolean;
+  items: readonly BulkFollowUpClearItem[];
+};
+
+export type BulkFollowUpClearResponse = {
+  selected_count: number;
+  changed_count: number;
+  unchanged_count: number;
+};
+
+export function bulkClearFindingFollowUp(
+  token: string,
+  body: BulkFollowUpClearRequest,
+): Promise<BulkFollowUpClearResponse> {
+  return apiFetch<BulkFollowUpClearResponse>(
+    "/v1/findings/follow-up-review/bulk-clear",
+    token,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        clear_owner: body.clear_owner,
+        clear_due: body.clear_due,
+        items: body.items.map((item) => ({
+          finding_id: item.finding_id,
+          expected_follow_up: {
+            assigned_to_user_id: item.expected_follow_up.assigned_to_user_id,
+            follow_up_due_at: item.expected_follow_up.follow_up_due_at,
+          },
+        })),
+      }),
+    },
+  );
+}
+
 export type AlertDeliveryStatus = {
   channel: string;
   destination_key: string;

@@ -131,6 +131,9 @@ class Settings(BaseSettings):
     rate_limit_organization_finding_follow_up_bulk_edit: int = Field(
         default=20, alias="RATE_LIMIT_ORGANIZATION_FINDING_FOLLOW_UP_BULK_EDIT"
     )
+    rate_limit_organization_finding_follow_up_bulk_clear: int = Field(
+        default=20, alias="RATE_LIMIT_ORGANIZATION_FINDING_FOLLOW_UP_BULK_CLEAR"
+    )
     rate_limit_window_seconds: int = Field(default=3600, alias="RATE_LIMIT_WINDOW_SECONDS")
 
     email_delivery_enabled: bool = Field(default=False, alias="EMAIL_DELIVERY_ENABLED")
